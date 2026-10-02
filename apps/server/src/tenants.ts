@@ -8,7 +8,7 @@ import type { GatewayConfig, TenantRecord } from '@higgsfield-mcp/config';
  */
 export function accountIdFromCredential(credentials: string): string {
   // Accepts both the dashboard `<id>:<secret>` form and `Key <id>:<secret>`.
-  const match = /^(?:key\s+)?([^:\s]{1,128}):/.exec(credentials.trim());
+  const match = /^(?:key\s+)?([^:\s]{1,128}):/i.exec(credentials.trim());
   if (match?.[1] !== undefined) return match[1];
   return 'default';
 }

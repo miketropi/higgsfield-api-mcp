@@ -16,6 +16,6 @@ export function toAuthorizationValue(credentials: string): string {
 
 /** Extracts the API-key id from either credential form, for account binding. */
 export function credentialKeyId(credentials: string): string | undefined {
-  const match = /^(?:key\s+)?([^:\s]{1,128}):/.exec(credentials.trim());
+  const match = /^(?:key\s+)?([^:\s]{1,128}):/i.exec(credentials.trim());
   return match?.[1];
 }
