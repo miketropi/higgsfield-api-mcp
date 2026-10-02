@@ -56,10 +56,10 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit tests
-        run: pnpm test:unit
+        run: pnpm test:unit -- --reporter=default --reporter=github-actions
 
       - name: Contract tests
-        run: pnpm test:contract
+        run: pnpm test:contract -- --reporter=default --reporter=github-actions
 
       - name: Skills validation
         run: pnpm skills:validate
