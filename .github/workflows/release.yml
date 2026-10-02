@@ -97,7 +97,9 @@ jobs:
       - name: Generate an SBOM
         uses: anchore/sbom-action@v0
         with:
-          path: artifacts/higgsfield-mcp-${{ steps.version.outputs.version }}.tgz
+          # Scan the built image itself. Pointing the action at the npm tarball made
+          # syft exit 1 on the release run for v0.1.0, which skipped the artifact upload.
+          image: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
           format: spdx-json
           output-file: artifacts/sbom.spdx.json
           artifact-name: sbom.spdx.json

@@ -103,7 +103,6 @@ export interface HiggsfieldFetchResponse {
 export class HiggsfieldHttpClient {
   readonly baseUrl: string;
 
-  private readonly credentials: ProviderCredentials;
   private readonly authorizationValue: string;
   private readonly requestTimeoutMs: number;
   private readonly uploadTimeoutMs: number;
@@ -130,7 +129,6 @@ export class HiggsfieldHttpClient {
     if (typeof credential !== 'string' || credential.length === 0 || !HEADER_VALUE_PATTERN.test(credential)) {
       throw new GatewayError('AUTHENTICATION_FAILED', 'The configured provider credential is not a usable header value.');
     }
-    this.credentials = options.credentials;
     // Normalize `<id>:<secret>` to the documented `Key <id>:<secret>` header form.
     this.authorizationValue = toAuthorizationValue(credential);
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
