@@ -64,6 +64,12 @@ jobs:
           if [ "${status}" -ne 0 ]; then
             # Mirror the failure detail into the check-run annotations, which is the view
             # a reader sees without fetching logs.
+            {
+              echo '### Unit tests failed'; echo; echo '```';
+              awk '/Failed Tests/{p=1} p' "${RUNNER_TEMP}/unit.log" || true;
+              tail -c 1500 "${RUNNER_TEMP}/unit.log";
+              echo '```';
+            } | tee -a "${GITHUB_STEP_SUMMARY}"
             { awk '/Failed Tests/{p=1} p' "${RUNNER_TEMP}/unit.log" || true; tail -c 1500 "${RUNNER_TEMP}/unit.log"; } \
               | head -c 6000 | sed 's/^/::error::/'
             exit "${status}"
@@ -76,6 +82,12 @@ jobs:
           status="${PIPESTATUS[0]}"
           set -e
           if [ "${status}" -ne 0 ]; then
+            {
+              echo '### Contract tests failed'; echo; echo '```';
+              awk '/Failed Tests/{p=1} p' "${RUNNER_TEMP}/contract.log" || true;
+              tail -c 1500 "${RUNNER_TEMP}/contract.log";
+              echo '```';
+            } | tee -a "${GITHUB_STEP_SUMMARY}"
             { awk '/Failed Tests/{p=1} p' "${RUNNER_TEMP}/contract.log" || true; tail -c 1500 "${RUNNER_TEMP}/contract.log"; } \
               | head -c 6000 | sed 's/^/::error::/'
             exit "${status}"
