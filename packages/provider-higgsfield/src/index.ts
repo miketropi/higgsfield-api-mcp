@@ -103,3 +103,5 @@ export type {
   HiggsfieldProviderOptions,
   ProviderJobHandle
 } from './provider.js';
+
+export { credentialKeyId, toAuthorizationValue } from './credentials.js';

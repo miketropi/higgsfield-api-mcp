@@ -14,6 +14,7 @@
  *   path so nothing caller-supplied can inject a query or traversal.
  */
 import { GatewayError, canonicalJson } from '@higgsfield-mcp/core';
+import { toAuthorizationValue } from '../credentials.js';
 import type { ProviderCredentials } from '@higgsfield-mcp/core';
 import {
   ProviderHttpError,
@@ -103,6 +104,7 @@ export class HiggsfieldHttpClient {
   readonly baseUrl: string;
 
   private readonly credentials: ProviderCredentials;
+  private readonly authorizationValue: string;
   private readonly requestTimeoutMs: number;
   private readonly uploadTimeoutMs: number;
   private readonly fetchImpl: HiggsfieldFetch;
@@ -129,6 +131,8 @@ export class HiggsfieldHttpClient {
       throw new GatewayError('AUTHENTICATION_FAILED', 'The configured provider credential is not a usable header value.');
     }
     this.credentials = options.credentials;
+    // Normalize `<id>:<secret>` to the documented `Key <id>:<secret>` header form.
+    this.authorizationValue = toAuthorizationValue(credential);
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.uploadTimeoutMs = options.uploadTimeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -317,7 +321,7 @@ export class HiggsfieldHttpClient {
   private jsonHeaders(): Record<string, string> {
     return {
       Accept: 'application/json',
-      Authorization: this.credentials.credentials,
+      Authorization: this.authorizationValue,
       ...this.defaultHeaders
     };
   }
