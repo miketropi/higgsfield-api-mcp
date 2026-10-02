@@ -56,10 +56,28 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit tests
-        run: pnpm test:unit -- --reporter=default --reporter=github-actions
+        run: |
+          set +e
+          pnpm test:unit -- --reporter=default --reporter=github-actions 2>&1 | tee "${RUNNER_TEMP}/unit.log"
+          status="${PIPESTATUS[0]}"
+          set -e
+          if [ "${status}" -ne 0 ]; then
+            # Mirror the tail of the output into the check-run annotations, which is
+            # the view a reader sees without fetching logs.
+            tail -c 3500 "${RUNNER_TEMP}/unit.log" | sed 's/^/::error::/'
+            exit "${status}"
+          fi
 
       - name: Contract tests
-        run: pnpm test:contract -- --reporter=default --reporter=github-actions
+        run: |
+          set +e
+          pnpm test:contract -- --reporter=default --reporter=github-actions 2>&1 | tee "${RUNNER_TEMP}/contract.log"
+          status="${PIPESTATUS[0]}"
+          set -e
+          if [ "${status}" -ne 0 ]; then
+            tail -c 3500 "${RUNNER_TEMP}/contract.log" | sed 's/^/::error::/'
+            exit "${status}"
+          fi
 
       - name: Skills validation
         run: pnpm skills:validate
