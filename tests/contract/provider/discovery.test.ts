@@ -109,14 +109,14 @@ describe('documentation parser', () => {
       '',
       '## Workflows',
       '',
-      '| Workflow | Endpoint |',
-      '| - | - |',
-      '| [A](/docs/models/a/x) | `POST /a/x` |',
-      '',
       '```md',
       '## Not a section',
       '| [B](/docs/models/a/y) | `POST /a/y` |',
       '```',
+      '',
+      '| Workflow | Endpoint |',
+      '| - | - |',
+      '| [A](/docs/models/a/x) | `POST /a/x` |',
       '',
       '## Related topics',
       '',
@@ -124,11 +124,13 @@ describe('documentation parser', () => {
     ].join('\n');
     const section = findSection(page, 'Workflows');
     expect(section).toBeDefined();
-    expect(section).not.toContain('Not a section');
-    expect(section).not.toContain('/docs/models/a/z');
+    // The quoted heading inside the fence must not end the section: the real table
+    // follows it and is still part of `Workflows`.
     expect(parseWorkflowTable(section as string)).toEqual([
       { name: 'A', target: '/docs/models/a/x', endpoint: 'a/x' }
     ]);
+    // The next same-level heading does end it.
+    expect(section).not.toContain('/docs/models/a/z');
     expect(findSection(page, 'Missing')).toBeUndefined();
   });
 
@@ -200,7 +202,7 @@ describe('model discovery', () => {
 
     expect(catalog).toMatchObject({
       source: 'official_documentation',
-      source_url: `${FIXTURE_DOCS_ORIGIN}/docs/models.md`,
+      sourceUrl: `${FIXTURE_DOCS_ORIGIN}/docs/models.md`,
       stale: false,
       fetchedAt: '2026-10-03T00:00:00.000Z',
       total: models.length,
@@ -211,6 +213,7 @@ describe('model discovery', () => {
         'alibaba/qwen-image-3/edit',
         'alibaba/qwen-image-3/text-to-image',
         'fixture/drift-model',
+        'fixture/no-schema',
         'fixture/preview-model',
         'higgsfield-ai/soul/standard',
         'kling-video/o3/image-reference',
@@ -276,7 +279,15 @@ describe('model discovery', () => {
     const external = byId(models, 'lightricks/ltx-2.5/fast/text-to-video');
     expect(external.schemaStatus).toBe('unavailable');
     expect(external.schemaReason).toBe('schema_reference_external');
-    expect(external.execution).toEqual({ supported: false, reason: 'schema_unavailable' });
+    // No adapter for this endpoint, so the missing adapter wins over the schema problem.
+    expect(external.execution).toEqual({ supported: false, reason: 'adapter_not_implemented' });
+
+    // A manifest endpoint whose page publishes no schema: the adapter exists, the
+    // documented contract does not, so execution must not be claimed.
+    const noSchema = byId(models, 'fixture/no-schema');
+    expect(noSchema.schemaStatus).toBe('unavailable');
+    expect(noSchema.schemaReason).toBe('schema_missing');
+    expect(noSchema.execution).toEqual({ supported: false, reason: 'schema_unavailable' });
 
     const missing = byId(models, 'pixverse/v6/text-to-video');
     expect(missing.schemaStatus).toBe('unavailable');

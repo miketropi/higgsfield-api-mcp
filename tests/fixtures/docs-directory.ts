@@ -53,8 +53,29 @@ const DRIFT_MODEL: ModelDefinition = {
   source: { url: `${FIXTURE_DOCS_ORIGIN}/docs/models/fixture-drift.md`, asOf: '2026-10-02' }
 };
 
+/** Manifest entry with no published schema, to exercise `schema_unavailable`. */
+const NO_SCHEMA_MODEL: ModelDefinition = {
+  id: 'fixture/no-schema',
+  name: 'Fixture No Schema Model',
+  provider: 'higgsfield',
+  type: 'image',
+  endpoint: 'fixture/no-schema',
+  kind: 'generation',
+  concurrencyClass: 'image',
+  capabilities: ['image_generation'],
+  status: 'active',
+  limits: {},
+  inputSchema: { type: 'object', properties: { prompt: { type: 'string' } } },
+  source: { url: `${FIXTURE_DOCS_ORIGIN}/docs/models/fixture-no-schema.md`, asOf: '2026-10-02' }
+};
+
 /** Execution manifest used by the discovery fixtures. */
-export const FIXTURE_MANIFEST: readonly ModelDefinition[] = [...TEST_CATALOG, PREVIEW_MODEL, DRIFT_MODEL];
+export const FIXTURE_MANIFEST: readonly ModelDefinition[] = [
+  ...TEST_CATALOG,
+  PREVIEW_MODEL,
+  DRIFT_MODEL,
+  NO_SCHEMA_MODEL
+];
 
 export interface FixtureWorkflowSpec {
   /** Category the family hangs off. */
@@ -191,38 +212,49 @@ function categoryPage(specs: readonly FixtureWorkflowSpec[], title: string): str
   ].join('\n');
 }
 
-const INDEX_PAGE = `# Model API Reference
-
-> Choose a Higgsfield image or video model and open its API reference or Playground.
-
-<div className="models-color-scope" aria-hidden="true" />
-
-Use the Higgsfield API to generate images and videos with leading foundation models.
-
-## Choose a model category
-
-<div className="model-category-grid">
-  <a className="model-category-card" href="/docs/models/video-generation">
-    <span className="model-category-title">Video Generation API</span>
-  </a>
-  <a className="model-category-card" href="/docs/models/image-generation">
-    <span className="model-category-title">Image Generation API</span>
-  </a>
-</div>
-
-## How the catalog works
-
-The sidebar is organized by output type and model family.
-
-## Availability
-
-Availability and access can change; check the [API Console](https://console.higgsfield.ai) for your account.
-
-## Related topics
-
-- [Unrelated upstream page](https://example.com/should-never-be-fetched)
-
-This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.`;
+/**
+ * The index advertises only the categories this fixture actually documents: the crawler
+ * treats an advertised-but-empty category as a malformed directory, which is correct
+ * behavior and must not be provoked accidentally by a narrow fixture.
+ */
+function indexPage(types: readonly ('image' | 'video')[]): string {
+  const cards = (['video', 'image'] as const)
+    .filter((type) => types.includes(type))
+    .flatMap((type) => [
+      `  <a className="model-category-card" href="/docs/models/${type}-generation">`,
+      `    <span className="model-category-title">${type === 'video' ? 'Video' : 'Image'} Generation API</span>`,
+      '  </a>'
+    ]);
+  return [
+    '# Model API Reference',
+    '',
+    '> Choose a Higgsfield image or video model and open its API reference or Playground.',
+    '',
+    '<div className="models-color-scope" aria-hidden="true" />',
+    '',
+    'Use the Higgsfield API to generate images and videos with leading foundation models.',
+    '',
+    '## Choose a model category',
+    '',
+    '<div className="model-category-grid">',
+    ...cards,
+    '</div>',
+    '',
+    '## How the catalog works',
+    '',
+    'The sidebar is organized by output type and model family.',
+    '',
+    '## Availability',
+    '',
+    'Availability and access can change; check the [API Console](https://console.higgsfield.ai) for your account.',
+    '',
+    '## Related topics',
+    '',
+    '- [Unrelated upstream page](https://example.com/should-never-be-fetched)',
+    '',
+    'This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.'
+  ].join('\n');
+}
 
 /** Manifest-derived workflows: every one of these is executable in the fixture. */
 export function manifestWorkflows(manifest: readonly ModelDefinition[]): FixtureWorkflowSpec[] {
@@ -306,6 +338,19 @@ function fixtureEntryWorkflows(manifest: readonly ModelDefinition[]): FixtureWor
       endpointUrl: `https://preview.higgsfield.ai/${preview.endpoint}`,
       title: 'Fixture Preview Model — Reference to video API',
       schema: preview.inputSchema
+    });
+  }
+  const noSchema = manifest.find((model) => model.id === 'fixture/no-schema');
+  if (noSchema !== undefined) {
+    specs.push({
+      type: 'image',
+      family: 'fixture-no-schema',
+      familyTitle: 'Fixture No Schema',
+      label: 'Generate',
+      path: 'fixture-no-schema/generate',
+      listedEndpoint: noSchema.endpoint,
+      title: 'Fixture No Schema Model — Generate API'
+      // No `schema`: the page publishes no accordion at all.
     });
   }
   return specs;
@@ -441,7 +486,8 @@ export function createDocsFixture(options: DocsFixtureOptions = {}): DocsFixture
   let offline = false;
 
   const writeCategories = (): void => {
-    pages.set('/docs/models.md', INDEX_PAGE);
+    const types = [...new Set(specs.map((spec) => spec.type))];
+    pages.set('/docs/models.md', indexPage(types));
     pages.set('/docs/models/image-generation.md', categoryPage(specs.filter((s) => s.type === 'image'), 'Image Generation API'));
     pages.set('/docs/models/video-generation.md', categoryPage(specs.filter((s) => s.type === 'video'), 'Video Generation API'));
   };

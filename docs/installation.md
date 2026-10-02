@@ -201,7 +201,7 @@ OMP/Pi: `/mcp reload`, then `/mcp list` and `/mcp test higgsfield`. Claude Code:
 and Windsurf reload their MCP config when the settings file is saved. In all cases, a
 successful connection means the tool list appears — 14 tools, exposed as
 `mcp__higgsfield__*` in OMP/Pi — plus five resources (`higgsfield://models`,
-`higgsfield://models/{id}`, `higgsfield://jobs/{id}`, `higgsfield://assets/{id}`,
+`higgsfield://models/{+id}`, `higgsfield://jobs/{id}`, `higgsfield://assets/{id}`,
 `higgsfield://capabilities`).
 
 ## Verify the install

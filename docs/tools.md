@@ -259,7 +259,7 @@ Scope: `higgsfield:read`. Input: optional `cursor`. Output:
 |---|---|---|---|---|
 | `higgsfield://capabilities` | The capabilities object | `application/json` | `higgsfield:read` | 60 s, public |
 | `higgsfield://models` | `{ "models": [ …discovered summaries… ], "catalog": { … } }` | `application/json` | `higgsfield:read` | 60 s, public |
-| `higgsfield://models/{id}` | The full discovered model, flattened with `catalog` | `application/json` | `higgsfield:read` | 60 s, public |
+| `higgsfield://models/{+id}` | The full discovered model, flattened with `catalog` | `application/json` | `higgsfield:read` | 60 s, public |
 | `higgsfield://jobs/{id}` | The job object | `application/json` | `higgsfield:read` | 0 s, private |
 | `higgsfield://assets/{id}` | The asset object | `application/json` | `higgsfield:read` | 0 s, private |
 

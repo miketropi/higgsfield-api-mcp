@@ -401,6 +401,8 @@ describe('MCP wire contract', () => {
 
   it('exposes resources with the documented URIs and no tenant-private data', async () => {
     expect(RESOURCE_URIS.models).toBe('higgsfield://models');
+    // Model ids contain slashes, so the template must use reserved expansion.
+    expect(RESOURCE_URIS.modelTemplate).toBe('higgsfield://models/{+id}');
     const { client, handler } = await connect(deps(), contextFor(['higgsfield:read']));
     const listed = await client.listResources();
     expect(listed.resources.map((resource) => resource.uri)).toContain(RESOURCE_URIS.capabilities);

@@ -176,7 +176,10 @@ export type ToolName = (typeof TOOL_NAMES)[number];
 
 export const RESOURCE_URIS = {
   models: 'higgsfield://models',
-  modelTemplate: 'higgsfield://models/{id}',
+  // Documented model ids contain slashes (`xai/grok-imagine-image-2.0`, `alibaba/qwen-image-3/edit`),
+  // so the id is a reserved RFC 6570 expansion: a simple `{id}` expression matches one
+  // path segment and would leave almost every model unaddressable.
+  modelTemplate: 'higgsfield://models/{+id}',
   jobTemplate: 'higgsfield://jobs/{id}',
   assetTemplate: 'higgsfield://assets/{id}',
   capabilities: 'higgsfield://capabilities'

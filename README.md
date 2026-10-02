@@ -171,8 +171,10 @@ Then reload the host and confirm the server is live:
 ```
 
 The server exposes 14 tools (named `mcp__higgsfield__*` in OMP/Pi) and five resources:
-`higgsfield://models`, `higgsfield://models/{id}`, `higgsfield://jobs/{id}`,
-`higgsfield://assets/{id}`, `higgsfield://capabilities`.
+`higgsfield://models`, `higgsfield://models/{+id}`, `higgsfield://jobs/{id}`,
+`higgsfield://assets/{id}`, `higgsfield://capabilities`. Model ids contain slashes, so
+`{+id}` is a reserved RFC 6570 expansion: read a model as
+`higgsfield://models/xai/grok-imagine-image-2.0`.
 
 ### Step 6 — First generation
 

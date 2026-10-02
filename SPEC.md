@@ -1360,7 +1360,7 @@ Examples:
 
 ```text
 higgsfield://models
-higgsfield://models/{id}
+higgsfield://models/{+id}
 
 higgsfield://jobs/{id}
 
