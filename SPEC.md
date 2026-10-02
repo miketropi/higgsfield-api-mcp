@@ -628,12 +628,46 @@ This tool MUST NOT bypass:
 
 # 10.3 Discovery Tools
 
+Discovery is read-only and separate from execution. `higgsfield.models.list` and
+`higgsfield.models.get` report what the provider documents today by reading its public
+documentation directory; they never submit generation, never spend, and never authorize an
+endpoint. The executable set is the bundled execution manifest, and
+`higgsfield.generate` re-checks every endpoint against it.
+
 ## `higgsfield.models.list`
 
 ```ts
 {
   type?: "image" | "video" | "audio" | "3d"
   capability?: string
+  execution_supported?: boolean
+}
+```
+
+Returns the discovered records plus catalog metadata:
+
+```ts
+{
+  models: Array<{
+    id
+    name
+    type
+    availability: "documented"
+    account_access: "unverified"
+    endpoint: string | null
+    capabilities: string[]
+    schema_status: "available" | "unavailable"
+    execution: { supported: boolean; reason?: string }
+  }>
+  catalog: {
+    source: "official_documentation"
+    source_url: string
+    fetched_at: string
+    stale: boolean
+    total: number
+    returned: number
+    warnings: string[]
+  }
 }
 ```
 
@@ -647,25 +681,42 @@ This tool MUST NOT bypass:
 }
 ```
 
-Returns:
+Returns the full discovered record, flattened with the same `catalog` metadata as
+`higgsfield.models.list`:
 
 ```ts
 {
   id
   name
   type
+  availability
+  account_access
+  endpoint
   capabilities
-  input_schema
-  limits
+  input_schema // present only when schema_status is "available"
+  schema_status
+  schema_reason? // why the schema is unusable, when it is
+  limits // copied from the execution manifest, so present only for known endpoints
   pricing
+  execution: { supported, reason? }
+  source: { url, urls, fetched_at }
+  catalog
 }
 ```
+
+`availability` is always `documented` and `account_access` always `unverified`: documented
+availability is not account entitlement. `execution.supported` is `true` only for a production
+endpoint that is in the execution manifest and whose documented schema still matches the
+manifest's input schema structurally; otherwise `false` with a `reason` of
+`adapter_not_implemented`, `schema_unavailable`, `schema_changed`, `environment_not_supported`,
+`endpoint_unverified` or `endpoint_conflict`.
 
 ---
 
 ## `higgsfield.capabilities`
 
-Returns gateway capabilities.
+Returns gateway capabilities, including the registered MCP tool names and their count, so a
+client can verify the surface it is talking to.
 
 Agents SHOULD be able to inspect the gateway instead of relying entirely on static knowledge.
 

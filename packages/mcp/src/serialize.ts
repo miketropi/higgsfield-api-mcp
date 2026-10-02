@@ -1,4 +1,11 @@
-import type { MediaAsset, StructuredError } from '@higgsfield-mcp/core';
+import type {
+  CatalogMetadata,
+  DiscoveredModel,
+  DiscoveredModelResult,
+  MediaAsset,
+  PricingDefinition,
+  StructuredError
+} from '@higgsfield-mcp/core';
 import { microUsdToUsd, toStructuredError } from '@higgsfield-mcp/core';
 import { z } from 'zod';
 
@@ -54,34 +61,75 @@ export const jobSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional()
 });
 
-export const modelSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: z.enum(['image', 'video', 'audio', '3d']),
-  status: z.enum(['active', 'deprecated', 'experimental']),
-  capabilities: z.array(z.string()),
-  endpoint: z.string(),
-  limits: z.record(z.string(), z.unknown()),
-  input_schema: z.record(z.string(), z.unknown()).optional(),
-  pricing: z
-    .object({
-      currency: z.literal('USD'),
-      unit_micro_usd: z.number().optional(),
-      per_second_micro_usd: z.number().optional(),
-      source: z.string(),
-      as_of: z.string()
-    })
-    .optional(),
-  source: z.object({ url: z.string(), as_of: z.string() })
+export const pricingSchema = z.object({
+  currency: z.literal('USD'),
+  unit_micro_usd: z.number().optional(),
+  per_second_micro_usd: z.number().optional(),
+  source: z.string(),
+  as_of: z.string()
 });
 
-export const modelSummarySchema = z.object({
+/**
+ * Discovery wire contract. A discovered record is not an execution definition: it
+ * carries documentation provenance, an explicit schema state and an explicit
+ * `execution.supported` verdict instead of a status the gateway cannot honor.
+ */
+export const discoverySourceSchema = z.object({
+  url: z.string(),
+  urls: z.array(z.string()),
+  fetched_at: z.string()
+});
+
+export const discoveryExecutionSchema = z.object({
+  supported: z.boolean(),
+  reason: z.string().optional()
+});
+
+export const catalogSchema = z.object({
+  source: z.literal('official_documentation'),
+  source_url: z.string(),
+  fetched_at: z.string(),
+  stale: z.boolean(),
+  total: z.number(),
+  returned: z.number(),
+  warnings: z.array(z.string())
+});
+
+export const discoveredModelSchema = z.object({
   id: z.string(),
   name: z.string(),
   type: z.enum(['image', 'video', 'audio', '3d']),
-  status: z.enum(['active', 'deprecated', 'experimental']),
-  capabilities: z.array(z.string())
+  availability: z.literal('documented'),
+  account_access: z.literal('unverified'),
+  endpoint: z.string().nullable(),
+  capabilities: z.array(z.string()),
+  schema_status: z.enum(['available', 'unavailable']),
+  schema_reason: z.string().optional(),
+  input_schema: z.record(z.string(), z.unknown()).optional(),
+  limits: z.record(z.string(), z.unknown()).optional(),
+  pricing: pricingSchema.optional(),
+  execution: discoveryExecutionSchema,
+  source: discoverySourceSchema
 });
+
+export const discoveredModelSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(['image', 'video', 'audio', '3d']),
+  availability: z.literal('documented'),
+  account_access: z.literal('unverified'),
+  endpoint: z.string().nullable(),
+  capabilities: z.array(z.string()),
+  schema_status: z.enum(['available', 'unavailable']),
+  execution: discoveryExecutionSchema
+});
+
+export const discoveredCatalogSchema = z.object({
+  models: z.array(discoveredModelSummarySchema),
+  catalog: catalogSchema
+});
+
+export const discoveredModelResultSchema = discoveredModelSchema.extend({ catalog: catalogSchema });
 
 export const capabilitiesSchema = z.object({
   gateway_version: z.string(),
@@ -89,6 +137,7 @@ export const capabilitiesSchema = z.object({
   provider: z.object({ id: z.string(), version: z.string() }),
   skills_version: z.string(),
   capabilities: z.array(z.string()),
+  tools: z.object({ count: z.number(), names: z.array(z.string()) }),
   auth: z.object({ mode: z.string(), scopes: z.array(z.string()) }),
   limits: z.object({
     max_wait_ms: z.number(),
@@ -106,7 +155,9 @@ export const confirmationSchema = z.object({
 
 export type WireJob = z.infer<typeof jobSchema>;
 export type WireAsset = z.infer<typeof assetSchema>;
-export type WireModel = z.infer<typeof modelSchema>;
+export type WireDiscoveredModel = z.infer<typeof discoveredModelSchema>;
+export type WireDiscoveredSummary = z.infer<typeof discoveredModelSummarySchema>;
+export type WireCatalog = z.infer<typeof catalogSchema>;
 export type WireError = z.infer<typeof errorSchema>;
 export type WireCapabilities = z.infer<typeof capabilitiesSchema>;
 
@@ -168,6 +219,75 @@ interface GenerationJobLike {
   cost?: { currency: 'USD'; estimatedMicroUsd?: number | undefined; actualMicroUsd?: number | undefined; source: string } | undefined;
   error?: StructuredError | undefined;
   metadata?: Record<string, unknown> | undefined;
+}
+
+function wirePricing(pricing: PricingDefinition): z.infer<typeof pricingSchema> {
+  return {
+    currency: 'USD',
+    source: pricing.source,
+    as_of: pricing.asOf,
+    ...(pricing.unitMicroUsd === undefined ? {} : { unit_micro_usd: pricing.unitMicroUsd }),
+    ...(pricing.perSecondMicroUsd === undefined ? {} : { per_second_micro_usd: pricing.perSecondMicroUsd })
+  };
+}
+
+export function serializeCatalog(catalog: CatalogMetadata): WireCatalog {
+  return {
+    source: catalog.source,
+    source_url: catalog.sourceUrl,
+    fetched_at: catalog.fetchedAt,
+    stale: catalog.stale,
+    total: catalog.total,
+    returned: catalog.returned,
+    warnings: [...catalog.warnings]
+  };
+}
+
+/** Full discovered record: endpoint, schema state, execution verdict and provenance. */
+export function serializeDiscoveredModel(model: DiscoveredModel): WireDiscoveredModel {
+  const wire: WireDiscoveredModel = {
+    id: model.id,
+    name: model.name,
+    type: model.type,
+    availability: model.availability,
+    account_access: model.accountAccess,
+    endpoint: model.endpoint,
+    capabilities: [...model.capabilities],
+    schema_status: model.schemaStatus,
+    execution: {
+      supported: model.execution.supported,
+      ...(model.execution.reason === undefined ? {} : { reason: model.execution.reason })
+    },
+    source: { url: model.source.url, urls: [...model.source.urls], fetched_at: model.source.fetchedAt }
+  };
+  if (model.schemaReason !== undefined) wire.schema_reason = model.schemaReason;
+  if (model.inputSchema !== undefined) wire.input_schema = model.inputSchema;
+  if (model.limits !== undefined) wire.limits = model.limits as Record<string, unknown>;
+  if (model.pricing !== undefined) wire.pricing = wirePricing(model.pricing);
+  return wire;
+}
+
+/** Listing shape: enough to choose a model without fetching every schema. */
+export function serializeDiscoveredSummary(model: DiscoveredModel): WireDiscoveredSummary {
+  return {
+    id: model.id,
+    name: model.name,
+    type: model.type,
+    availability: model.availability,
+    account_access: model.accountAccess,
+    endpoint: model.endpoint,
+    capabilities: [...model.capabilities],
+    schema_status: model.schemaStatus,
+    execution: {
+      supported: model.execution.supported,
+      ...(model.execution.reason === undefined ? {} : { reason: model.execution.reason })
+    }
+  };
+}
+
+/** `models.get` flattens the record and the snapshot metadata into one object. */
+export function serializeDiscoveredResult(result: DiscoveredModelResult): WireDiscoveredModel & { catalog: WireCatalog } {
+  return { ...serializeDiscoveredModel(result.model), catalog: serializeCatalog(result.catalog) };
 }
 
 export function serializeError(error: unknown): WireError {

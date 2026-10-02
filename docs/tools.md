@@ -19,13 +19,20 @@ These four fields are accepted by the generation tools (`higgsfield.generate_ima
 
 ### Cost and the prompt
 
-These tools are billable. `prompt` is the user's brief: a caller must not invent a subject
-nobody asked for — ask for one instead. Every generation response carries the estimate
-(`cost.estimated_cost_usd`, `cost.source` = `estimate_api` or `operator_override`). When
-`HF_MCP_REQUIRE_CONFIRM_ABOVE_USD` is configured, a request above the threshold returns
+These tools are billable, and the caller is responsible for the spend. `prompt` is the user's
+brief: a caller must not invent a subject nobody asked for — ask for one instead — and must not
+try to "discover" a model by submitting a cheap generation. Every generation response carries
+the estimate when one was available (`cost.estimated_cost_usd`, `cost.source` = `estimate_api`
+or `operator_override`); an estimate can be unavailable, and configured spend limits can reject
+a request outright.
+
+Only a request whose estimate is above `HF_MCP_REQUIRE_CONFIRM_ABOVE_USD` returns
 `status: "confirmation_required"` with an estimate and a single-use token instead of
-submitting; resubmit the identical request with `confirmation_token` to proceed. The token is
-bound to the tenant, tool and exact payload, and expires (10 minutes by default).
+submitting; an amount at or below the threshold submits normally. Resubmit the identical
+request with `confirmation_token` to proceed. The token is bound to the tenant, tool and exact
+payload, and expires (10 minutes by default). A token records that a caller acknowledged the
+amount — it does not prove a human approved it, so obtain the user's approval first. A returned
+job cost is the provider's reported figure, not invoice proof.
 
 ### Media references
 
@@ -98,7 +105,9 @@ Animate a still image into a short video. Scope: `higgsfield:generate`. Semantic
 ### `higgsfield.generate`
 
 Provider-native generation. Scope: `higgsfield:generate`. The `endpoint` must be an id present
-in `higgsfield.models.list`; arbitrary URLs are not accepted.
+in the execution manifest **and** reported by `higgsfield.models.get` with
+`execution.supported: true`; a documented-but-unsupported workflow is refused, and listing
+models never authorizes an arbitrary endpoint. Arbitrary URLs are not accepted.
 
 | Input | Type | Notes |
 |---|---|---|
@@ -129,16 +138,43 @@ belonging to another tenant both return `ACCESS_DENIED`.
 
 ### `higgsfield.models.list`
 
-Scope: `higgsfield:read`. Inputs: `type` (`image` \| `video` \| `audio` \| `3d`) and
-`capability` (string). Output: `{ "models": [ { id, name, type, status, capabilities } ] }`,
-sorted by id.
+Scope: `higgsfield:read`. Read-only: listing or comparing models never generates anything and
+never spends money — do not submit a sample generation to inspect a model.
+
+Inputs: `type` (`image` | `video` | `audio` | `3d`), `capability` (string) and
+`execution_supported` (boolean).
+
+This reads the provider's live public documentation directory, not the gateway's execution
+manifest, so it reports every documented workflow including ones this gateway cannot run.
+Output: `{ "models": [ …summaries… ], "catalog": { …metadata… } }`, sorted by id. Each summary
+carries `id`, `name`, `type`, `availability` (always `documented`), `account_access` (always
+`unverified`), `endpoint` (nullable), `capabilities`, `schema_status` and
+`execution: { supported, reason? }`.
+
+* A `capability` filter returns only entries whose capabilities were verified against the
+  execution manifest; a `type` filter returns every discovered entry of that type.
+* `catalog` reports `source` (`official_documentation`), `source_url`, `fetched_at`, `stale`,
+  `total` (all discovered entries), `returned` (after filtering) and bounded `warnings`.
+* Discovery is read lazily and cached in memory for ten minutes. If a refresh fails, the last
+  complete snapshot is served with `stale: true` and a warning for up to 24 hours; after that
+  the call fails with `PROVIDER_ERROR` (`details.reason: catalog_unavailable`).
 
 ### `higgsfield.models.get`
 
-Scope: `higgsfield:read`. Input: `model` (catalog id or alias). Output: the full model object —
-`id`, `name`, `type`, `status`, `capabilities`, `endpoint`, `limits`, optional `input_schema`,
-optional `pricing` (`currency`, `unit_micro_usd`, `per_second_micro_usd`, `source`, `as_of`),
-and `source` (`url`, `as_of`).
+Scope: `higgsfield:read`. Read-only; reading a model never generates anything. Input: `model`
+(a discovered id, which is the endpoint id except for the preserved `soul-id`). Output: the
+full discovered record — `id`, `name`, `type`, `availability`, `account_access`, `endpoint`,
+`capabilities`, `schema_status`, optional `schema_reason`, optional `input_schema`, optional
+`limits`, optional `pricing` (`currency`, `unit_micro_usd`, `per_second_micro_usd`, `source`,
+`as_of`), `execution` (`supported`, optional `reason`) and `source` (`url`, `urls`,
+`fetched_at`) — flattened together with the same `catalog` metadata as `models.list`. An
+unknown id returns `MODEL_NOT_FOUND`.
+
+`execution.supported` is `true` only for a production endpoint that is in the execution
+manifest and whose documented schema still matches the manifest's input schema structurally
+(key order, `title` and `description` excluded). Otherwise it is `false` with a `reason`:
+`adapter_not_implemented`, `schema_unavailable`, `schema_changed`, `environment_not_supported`,
+`endpoint_unverified` or `endpoint_conflict`.
 
 ### `higgsfield.capabilities`
 
@@ -151,6 +187,7 @@ Scope: `higgsfield:read`. Input: none (an empty object). Output:
   "provider": { "id": "higgsfield", "version": "0.1.0" },
   "skills_version": "0.1.0+upstream.0.13.0",
   "capabilities": ["audio_generation", "image_edit", "image_generation", "..."],
+  "tools": { "count": 14, "names": ["higgsfield.animate_image", "higgsfield.capabilities", "..."] },
   "auth": { "mode": "none", "scopes": ["higgsfield:read", "higgsfield:generate", "higgsfield:upload"] },
   "limits": { "max_wait_ms": 25000, "max_image_jobs": 10, "max_video_jobs": 3 }
 }
@@ -158,6 +195,10 @@ Scope: `higgsfield:read`. Input: none (an empty object). Output:
 
 `skills_version` is `<adapterVersion>+upstream.<version>` from the skills manifest, or
 `unavailable` when no skills tree is resolved.
+
+`tools.names` is the registered tool surface and `tools.count` is derived from it, so the
+published count can never drift from `tools/list`. `capabilities` describes provider
+capabilities only; discovered model counts are reported by `higgsfield.models.list`.
 
 ### `higgsfield.jobs.get`
 
@@ -217,10 +258,14 @@ Scope: `higgsfield:read`. Input: optional `cursor`. Output:
 | URI | Body | MIME | Scope | Cache hint |
 |---|---|---|---|---|
 | `higgsfield://capabilities` | The capabilities object | `application/json` | `higgsfield:read` | 60 s, public |
-| `higgsfield://models` | `{ "models": [ …summaries… ] }` | `application/json` | `higgsfield:read` | 60 s, public |
-| `higgsfield://models/{id}` | The full model object | `application/json` | `higgsfield:read` | 60 s, public |
+| `higgsfield://models` | `{ "models": [ …discovered summaries… ], "catalog": { … } }` | `application/json` | `higgsfield:read` | 60 s, public |
+| `higgsfield://models/{id}` | The full discovered model, flattened with `catalog` | `application/json` | `higgsfield:read` | 60 s, public |
 | `higgsfield://jobs/{id}` | The job object | `application/json` | `higgsfield:read` | 0 s, private |
 | `higgsfield://assets/{id}` | The asset object | `application/json` | `higgsfield:read` | 0 s, private |
+
+The two model resources read the same discovery snapshot as `higgsfield.models.list` and
+`higgsfield.models.get`: within one cache window they report identical `catalog.fetched_at`
+values, so a resource read can never disagree with a tool call.
 
 A resource body that fails its schema check is reported as `INTERNAL_ERROR` rather than
 returned unvalidated.

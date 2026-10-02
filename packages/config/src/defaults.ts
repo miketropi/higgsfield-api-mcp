@@ -100,7 +100,6 @@ export const CONFIG_DEFAULTS: Readonly<GatewayConfig> = deepFreeze<GatewayConfig
   },
   features: {
     agentApi: false,
-    dynamicModels: false,
     webhooks: false
   },
   workers: {

@@ -51,7 +51,7 @@ describe('CONFIG_DEFAULTS', () => {
       metricsEnabled: true,
       serviceName: 'higgsfield-mcp'
     });
-    expect(CONFIG_DEFAULTS.features).toEqual({ agentApi: false, dynamicModels: false, webhooks: false });
+    expect(CONFIG_DEFAULTS.features).toEqual({ agentApi: false, webhooks: false });
     expect(CONFIG_DEFAULTS.workers).toMatchObject({
       enabled: true,
       pollIntervalFloorMs: 2_000,

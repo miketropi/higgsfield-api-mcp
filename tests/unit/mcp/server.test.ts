@@ -5,7 +5,8 @@ import type {
   RequestContext,
   StructuredError
 } from '@higgsfield-mcp/core';
-import { GatewayError } from '@higgsfield-mcp/core';
+import { GatewayError, createModelRegistry } from '@higgsfield-mcp/core';
+import { createModelDiscovery } from '@higgsfield-mcp/provider-higgsfield';
 import {
   RESOURCE_URIS,
   TOOL_NAMES,
@@ -21,7 +22,8 @@ import { Client } from '@modelcontextprotocol/client';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import type { CallToolResult, McpHttpHandler } from '@modelcontextprotocol/server';
-import { createSilentLogger, createNullMetrics } from '../../fixtures/fakes.js';
+import { TEST_CATALOG, createSilentLogger, createNullMetrics } from '../../fixtures/fakes.js';
+import { createDocsFixture } from '../../fixtures/docs-directory.js';
 import type { McpToolDependencies } from '@higgsfield-mcp/mcp';
 
 type Handler = McpHttpHandler;
@@ -43,6 +45,27 @@ async function connect(
 function textOf(result: CallToolResult): string {
   const first = result.content[0];
   return first !== undefined && first.type === 'text' ? first.text : '';
+}
+
+/** Structured payload of a tool result, falling back to its JSON text content. */
+function body(result: CallToolResult): Record<string, unknown> {
+  return (result.structuredContent ?? JSON.parse(textOf(result))) as Record<string, unknown>;
+}
+
+interface WireModelSummary {
+  id: string;
+  type: string;
+  endpoint: string | null;
+  capabilities: string[];
+  schema_status: string;
+  execution: { supported: boolean; reason?: string };
+  availability: string;
+  account_access: string;
+}
+
+function modelsOf(result: CallToolResult): { models: WireModelSummary[]; catalog: Record<string, unknown> } {
+  const parsed = body(result) as unknown as { models: WireModelSummary[]; catalog: Record<string, unknown> };
+  return parsed;
 }
 
 const JOB: GenerationJob = {
@@ -72,6 +95,7 @@ const CAPABILITIES = {
   provider: { id: 'higgsfield', version: '0.1.0' },
   skillsVersion: '0.1.0+upstream.0.13.0',
   capabilities: ['image_generation'],
+  tools: { names: [...TOOL_NAMES] },
   auth: { mode: 'static_token' as const, scopes: ['higgsfield:read'] },
   limits: { maxWaitMs: 25_000, maxImageJobs: 10, maxVideoJobs: 3 }
 };
@@ -87,6 +111,12 @@ function contextFor(scopes: string[]): RequestContext {
 
 function deps(overrides: Partial<McpToolDependencies> = {}): McpToolDependencies {
   const job = JOB;
+  const registry = createModelRegistry({ models: TEST_CATALOG });
+  const discovery = createModelDiscovery({
+    manifest: registry,
+    fetch: createDocsFixture({ manifest: TEST_CATALOG }).fetch,
+    clock: { now: () => new Date() }
+  });
   return {
     generation: {
       async submit(): Promise<GenerationResult> {
@@ -142,32 +172,8 @@ function deps(overrides: Partial<McpToolDependencies> = {}): McpToolDependencies
         throw new GatewayError('INVALID_INPUT', 'not used');
       }
     },
-    models: {
-      list() {
-        return [];
-      },
-      get(id: string) {
-        return {
-          id,
-          name: id,
-          provider: 'higgsfield',
-          type: 'image',
-          endpoint: id,
-          kind: 'generation',
-          concurrencyClass: 'image',
-          capabilities: ['image_generation'],
-          status: 'active',
-          limits: {},
-          source: { url: 'https://docs.higgsfield.ai/', asOf: '2026-10-01' }
-        };
-      },
-      resolve(id: string) {
-        return this.get(id);
-      },
-      aliases() {
-        return {};
-      }
-    },
+    models: registry,
+    discovery,
     capabilities: CAPABILITIES,
     admission: { async admit() { return { allowed: true }; } },
     logger: createSilentLogger(),
@@ -217,6 +223,7 @@ describe('MCP wire contract', () => {
     const wire = serializeCapabilities(CAPABILITIES) as unknown as Record<string, unknown>;
     expect(wire['gateway_version']).toBe('0.1.0');
     expect((wire['limits'] as Record<string, unknown>)['max_wait_ms']).toBe(25_000);
+    expect(wire['tools']).toEqual({ count: TOOL_NAMES.length, names: [...TOOL_NAMES] });
   });
 
   it('converts asset_id wire references anywhere inside native input', () => {
@@ -229,13 +236,93 @@ describe('MCP wire contract', () => {
     });
   });
 
-  it('registers every frozen tool name over the real protocol and returns structured content', async () => {
+  it('registers every frozen tool name and publishes the identical surface in capabilities', async () => {
     const { client, handler } = await connect(deps(), contextFor(['higgsfield:read', 'higgsfield:generate']));
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
-    const listed = await client.callTool({ name: 'higgsfield.models.list', arguments: {} });
-    expect(listed.isError).toBeFalsy();
-    expect(listed.structuredContent).toEqual({ models: [] });
+
+    const capabilities = body(await client.callTool({ name: 'higgsfield.capabilities', arguments: {} })) as unknown as {
+      tools: { count: number; names: string[] };
+    };
+    expect(capabilities.tools.names.slice().sort()).toEqual(tools.tools.map((tool) => tool.name).sort());
+    expect(capabilities.tools.count).toBe(tools.tools.length);
+    await client.close();
+    await handler.close();
+  });
+
+  it('reports documented models, execution support and the snapshot metadata without generating', async () => {
+    let submissions = 0;
+    const { client, handler } = await connect(
+      deps({
+        generation: {
+          async submit(): Promise<GenerationResult> {
+            submissions += 1;
+            return JOB;
+          }
+        }
+      }),
+      contextFor(['higgsfield:read', 'higgsfield:generate'])
+    );
+
+    const all = modelsOf(await client.callTool({ name: 'higgsfield.models.list', arguments: {} }));
+    expect(all.catalog).toMatchObject({ source: 'official_documentation', stale: false });
+    expect(all.catalog['total']).toBe(all.models.length);
+    expect(all.catalog['returned']).toBe(all.models.length);
+    expect(all.models.map((model) => model.id)).toContain('alibaba/qwen-image-3/text-to-image');
+    expect(all.models.find((model) => model.id === 'xai/grok-imagine-image-2.0')).toMatchObject({
+      availability: 'documented',
+      account_access: 'unverified',
+      schema_status: 'available',
+      execution: { supported: true }
+    });
+
+    const filtered = modelsOf(
+      await client.callTool({
+        name: 'higgsfield.models.list',
+        arguments: { type: 'image', execution_supported: false }
+      })
+    );
+    expect(filtered.models.length).toBeGreaterThan(0);
+    for (const model of filtered.models) {
+      expect(model.type).toBe('image');
+      expect(model.execution.supported).toBe(false);
+    }
+    expect(filtered.catalog['returned']).toBe(filtered.models.length);
+    expect(filtered.catalog['total']).toBeGreaterThan(filtered.models.length);
+
+    const one = await client.callTool({ name: 'higgsfield.models.get', arguments: { model: 'xai/grok-imagine-image-2.0' } });
+    const detail = body(one);
+    expect(detail['id']).toBe('xai/grok-imagine-image-2.0');
+    expect(detail['execution']).toEqual({ supported: true });
+    expect(detail['catalog']).toMatchObject({ source: 'official_documentation' });
+    expect(typeof detail['source']).toBe('object');
+
+    const missing = await client.callTool({ name: 'higgsfield.models.get', arguments: { model: 'does/not/exist' } });
+    expect(missing.isError).toBe(true);
+    expect(body(missing)['error']).toMatchObject({ code: 'MODEL_NOT_FOUND' });
+
+    // Discovery is read-only: none of the above may have submitted a generation.
+    expect(submissions).toBe(0);
+    await client.close();
+    await handler.close();
+  });
+
+  it('serves the tool and resource surfaces from one catalog snapshot', async () => {
+    const { client, handler } = await connect(deps(), contextFor(['higgsfield:read']));
+    const listed = modelsOf(await client.callTool({ name: 'higgsfield.models.list', arguments: {} }));
+
+    const resource = await client.readResource({ uri: RESOURCE_URIS.models });
+    const resourceBody = JSON.parse((resource.contents[0] as { text: string }).text) as {
+      models: WireModelSummary[];
+      catalog: Record<string, unknown>;
+    };
+    expect(resourceBody.catalog['fetched_at']).toBe(listed.catalog['fetched_at']);
+    expect(resourceBody.models.map((model) => model.id)).toEqual(listed.models.map((model) => model.id));
+
+    const single = await client.readResource({ uri: 'higgsfield://models/xai/grok-imagine-image-2.0' });
+    const singleBody = JSON.parse((single.contents[0] as { text: string }).text) as Record<string, unknown>;
+    expect(singleBody['id']).toBe('xai/grok-imagine-image-2.0');
+    expect((singleBody['catalog'] as Record<string, unknown>)['fetched_at']).toBe(listed.catalog['fetched_at']);
     await client.close();
     await handler.close();
   });

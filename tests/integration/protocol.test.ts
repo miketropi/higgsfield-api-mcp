@@ -38,10 +38,16 @@ describe('protocol gate', () => {
     const client = await stdioClient('auto');
     expect(client.getProtocolEra()).toBe('modern');
     const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+    const names = tools.tools.map((tool) => tool.name).sort();
+    expect(names).toEqual([...TOOL_NAMES].sort());
     for (const tool of tools.tools) {
       expect(tool.inputSchema?.type).toBe('object');
     }
+
+    const capabilities = await client.callTool({ name: 'higgsfield.capabilities', arguments: {} });
+    const wireCapabilities = capabilities.structuredContent as { tools: { count: number; names: string[] } };
+    expect(wireCapabilities.tools.names.slice().sort()).toEqual(names);
+    expect(wireCapabilities.tools.count).toBe(tools.tools.length);
 
     const listed = await client.listResources();
     expect(listed.resources.map((resource) => resource.uri)).toContain('higgsfield://models');
@@ -55,8 +61,82 @@ describe('protocol gate', () => {
     expect(waited.isError).toBeFalsy();
     expect((waited.structuredContent as Record<string, unknown>)['status']).toBe('queued');
 
-    const capabilities = await client.callTool({ name: 'higgsfield.capabilities', arguments: {} });
-    expect((capabilities.structuredContent as Record<string, unknown>)['mcp_protocol']).toBe('2026-07-28');
+    const revision = await client.callTool({ name: 'higgsfield.capabilities', arguments: {} });
+    expect((revision.structuredContent as Record<string, unknown>)['mcp_protocol']).toBe('2026-07-28');
+    await client.close();
+  });
+
+  it('publishes the discovered catalog over stdio and refuses documented-but-unsupported endpoints', async () => {
+    const client = await stdioClient('auto');
+    const listed = (await client.callTool({ name: 'higgsfield.models.list', arguments: {} })).structuredContent as {
+      models: { id: string; execution: { supported: boolean; reason?: string } }[];
+      catalog: { source: string; total: number; returned: number; stale: boolean; source_url: string };
+    };
+    expect(listed.catalog).toMatchObject({ source: 'official_documentation', stale: false });
+    expect(listed.catalog.total).toBe(listed.models.length);
+    expect(listed.catalog.source_url).toBe('https://docs.higgsfield.ai/docs/models.md');
+
+    const unsupported = (await client.callTool({
+      name: 'higgsfield.models.list',
+      arguments: { type: 'image', execution_supported: false }
+    })).structuredContent as { models: { id: string; execution: { supported: boolean } }[] };
+    expect(unsupported.models.length).toBeGreaterThan(0);
+    expect(unsupported.models.every((model) => model.execution.supported === false)).toBe(true);
+
+    // The endpoint is documented, so it is discoverable — and still not runnable.
+    const endpoint = 'alibaba/qwen-image-3/text-to-image';
+    expect(unsupported.models.some((model) => model.id === endpoint)).toBe(true);
+    const refused = await client.callTool({
+      name: 'higgsfield.generate',
+      arguments: { endpoint, input: { prompt: 'a lighthouse' } }
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse(String((refused.content[0] as { text: string }).text))).toMatchObject({
+      error: { code: 'MODEL_NOT_FOUND' }
+    });
+    await client.close();
+  });
+
+  it('keeps discovery read-only and refuses a documented-but-unsupported endpoint before any provider call', async () => {
+    const client = new Client({ name: 'http-discovery', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${gateway.url}/mcp`), {
+        fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set('authorization', `Bearer ${TEST_TOKEN}`);
+          return fetch(input, { ...init, headers });
+        }
+      })
+    );
+
+    const before = gateway.provider.calls.length;
+    const submitsBefore = gateway.provider.submitCount();
+    const models = (await client.callTool({ name: 'higgsfield.models.list', arguments: {} })).structuredContent as {
+      models: { id: string; execution: { supported: boolean; reason?: string } }[];
+      catalog: { fetched_at: string; total: number };
+    };
+    const detail = (await client.callTool({
+      name: 'higgsfield.models.get',
+      arguments: { model: 'alibaba/qwen-image-3/text-to-image' }
+    })).structuredContent as { endpoint: string | null; execution: { supported: boolean; reason?: string } };
+    expect(detail.execution).toEqual({ supported: false, reason: 'adapter_not_implemented' });
+
+    // Discovery is a read: it never touches the provider at all.
+    expect(gateway.provider.calls.slice(before)).toHaveLength(0);
+    expect(gateway.provider.submitCount()).toBe(submitsBefore);
+
+    // The documented workflow is discoverable, and submitting it is still refused.
+    expect(models.models.some((model) => model.id === 'alibaba/qwen-image-3/text-to-image')).toBe(true);
+    expect(models.catalog.total).toBe(models.models.length);
+    const refused = await client.callTool({
+      name: 'higgsfield.generate',
+      arguments: { endpoint: 'alibaba/qwen-image-3/text-to-image', input: { prompt: 'a lighthouse' } }
+    });
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse(String((refused.content[0] as { text: string }).text))).toMatchObject({
+      error: { code: 'MODEL_NOT_FOUND' }
+    });
+    expect(gateway.provider.calls.filter((call) => call.kind === 'prepare' || call.kind === 'submit')).toHaveLength(0);
     await client.close();
   });
 

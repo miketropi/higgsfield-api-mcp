@@ -177,11 +177,15 @@ The server exposes 14 tools (named `mcp__higgsfield__*` in OMP/Pi) and five reso
 ### Step 6 — First generation
 
 Ask the agent for an image, or drive the tools directly. Start with a read-only call, which
-costs nothing:
+costs nothing and needs no provider credential:
 
 ```jsonc
-// higgsfield.models.list -> {"models": [{"id": "xai/grok-imagine-image-2.0", ...}]}
+// higgsfield.models.list -> {"models": [{"id": "xai/grok-imagine-image-2.0", "execution": {"supported": true}, ...}], "catalog": {...}}
 ```
+
+`higgsfield.models.list` reads the provider's live public documentation directory, so it
+reports every documented workflow — an order of magnitude more than this gateway can run — and
+each entry says whether it is executable here. Listing models never generates anything.
 
 Then generate. **This is billable** — the estimate below is what the provider returns for a
 2k Grok image:
@@ -288,7 +292,7 @@ The installed shim is `$HF_HOME/node_modules/.bin/higgsfield-mcp` (shown below a
 | `higgsfield-mcp serve --transport http --host 0.0.0.0 --port 3000` | Serve Streamable HTTP plus `/health`, `/ready`, `/metrics`, and the webhook route. |
 | `higgsfield-mcp serve --config ./gateway.json` | Serve using a JSON config file. |
 | `higgsfield-mcp doctor` | Environment and readiness checks; never performs paid generation. |
-| `higgsfield-mcp models` | Print the bundled model catalog, one model per line. |
+| `higgsfield-mcp models` | Print the discovered model catalog as `higgsfield.models.list` reports it, one model per line with its execution support. |
 | `higgsfield-mcp skills list` | Print the pinned upstream revision and the per-skill classification. |
 | `higgsfield-mcp skills sync [--upstream <url>]` | Re-generate the skills tree from the pinned upstream. |
 | `higgsfield-mcp skills check-upstream` | Report upstream drift; non-zero exit when the pin is stale. |

@@ -1,10 +1,4 @@
-import type {
-  GenerationResult,
-  LoggerPort,
-  ModelDefinition,
-  RequestContext,
-  StructuredError
-} from '@higgsfield-mcp/core';
+import type { GenerationResult, LoggerPort, RequestContext, StructuredError } from '@higgsfield-mcp/core';
 import { GatewayError, toStructuredError } from '@higgsfield-mcp/core';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
 import type { CallToolResult } from '@modelcontextprotocol/server';
@@ -34,15 +28,18 @@ import {
   assetSchema,
   capabilitiesSchema,
   confirmationSchema,
+  discoveredCatalogSchema,
+  discoveredModelResultSchema,
   errorEnvelope,
   jobSchema,
   jsonText,
-  modelSchema,
-  modelSummarySchema,
   serializeAsset,
+  serializeCatalog,
+  serializeDiscoveredResult,
+  serializeDiscoveredSummary,
   serializeJob
 } from './serialize.js';
-import type { WireCapabilities, WireModel } from './serialize.js';
+import type { WireCatalog, WireCapabilities } from './serialize.js';
 
 const DEFAULT_WAIT_MS = 20_000;
 
@@ -52,10 +49,13 @@ const DEFAULT_WAIT_MS = 20_000;
  * subject the user never asked for and submit it in one step.
  */
 const BILLABLE_BRIEFING =
-  'The prompt is the user\'s brief: never invent a subject the user did not ask for — ask for one instead. ' +
-  'The call is billable; report the returned cost estimate. When a cost guard is configured this tool returns ' +
-  'status "confirmation_required" with confirmation_token instead of submitting, and the same request must be ' +
-  'resubmitted with that token to proceed.';
+  'This tool creates or edits media and the request is billable, so only call it when the user asked for generation ' +
+  'or editing. The prompt is the user\'s brief: elaborate a subject the user authorised, never invent one to turn ' +
+  'model discovery into spending — ask for a brief instead. Report the returned cost; a returned job cost is the ' +
+  'provider\'s reported figure, not invoice proof. A cost estimate can be unavailable, and configured spend limits ' +
+  'can reject the request outright. Only an amount above the configured confirmation threshold returns status ' +
+  '"confirmation_required" with a confirmation_token; a token records that a caller acknowledged the amount and does ' +
+  'not prove a human approved it, so obtain the user\'s approval before resubmitting the same request with that token.';
 
 /**
  * Admission class per non-generation tool. Generation tools are deliberately absent:
@@ -74,42 +74,7 @@ const ADMISSION_CLASS_BY_TOOL: Readonly<Record<string, AdmissionClass | undefine
   'higgsfield.jobs.list': 'read'
 };
 const jobListSchema = z.object({ jobs: z.array(jobSchema), next_cursor: z.string().optional() });
-const modelsListSchema = z.object({ models: z.array(modelSummarySchema) });
 const generationResultSchema = z.union([jobSchema, confirmationSchema]);
-
-function summarizeModel(model: ModelDefinition): z.infer<typeof modelSummarySchema> {
-  return {
-    id: model.id,
-    name: model.name,
-    type: model.type,
-    status: model.status,
-    capabilities: model.capabilities
-  };
-}
-
-function serializeModel(model: ModelDefinition): WireModel {
-  const wire: WireModel = {
-    id: model.id,
-    name: model.name,
-    type: model.type,
-    status: model.status,
-    capabilities: model.capabilities,
-    endpoint: model.endpoint,
-    limits: model.limits as Record<string, unknown>,
-    source: { url: model.source.url, as_of: model.source.asOf }
-  };
-  if (model.inputSchema !== undefined) wire.input_schema = model.inputSchema;
-  if (model.pricing !== undefined) {
-    wire.pricing = {
-      currency: 'USD',
-      source: model.pricing.source,
-      as_of: model.pricing.asOf,
-      ...(model.pricing.unitMicroUsd === undefined ? {} : { unit_micro_usd: model.pricing.unitMicroUsd }),
-      ...(model.pricing.perSecondMicroUsd === undefined ? {} : { per_second_micro_usd: model.pricing.perSecondMicroUsd })
-    };
-  }
-  return wire;
-}
 
 export function serializeCapabilities(capabilities: GatewayCapabilitiesInfo): WireCapabilities {
   return {
@@ -118,6 +83,8 @@ export function serializeCapabilities(capabilities: GatewayCapabilitiesInfo): Wi
     provider: { id: capabilities.provider.id, version: capabilities.provider.version },
     skills_version: capabilities.skillsVersion,
     capabilities: capabilities.capabilities,
+    // Derived, never stored: the published count cannot drift from the names.
+    tools: { count: capabilities.tools.names.length, names: capabilities.tools.names },
     auth: { mode: capabilities.auth.mode, scopes: capabilities.auth.scopes },
     limits: {
       max_wait_ms: capabilities.limits.maxWaitMs,
@@ -323,7 +290,10 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     {
       title: 'Provider-native generation',
       description:
-        'Submit a request to a registered provider endpoint with provider-native fields. The endpoint must be present in higgsfield.models.list. ' +
+        'Submit a request to a registered provider endpoint with provider-native fields. The endpoint must appear in ' +
+        'higgsfield.models.get with execution.supported true: a workflow that is merely documented is not runnable ' +
+        'here, and listing models never authorizes an arbitrary endpoint. The gateway re-checks the endpoint against ' +
+        'its own allowlist before any provider call and refuses anything else. ' +
         BILLABLE_BRIEFING,
       inputSchema: generateInput,
       outputSchema: generationResultSchema
@@ -387,18 +357,29 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     'higgsfield.models.list',
     {
       title: 'List models',
-      description: 'List the registered models, optionally filtered by media type or capability.',
+      description:
+        'Read-only. List the workflows the provider documents today, optionally filtered by media type, capability or ' +
+        'execution support. Each entry reports its documentation provenance, whether a schema was readable, and ' +
+        'execution.supported — true only when this gateway can run that endpoint as documented. Discovering or ' +
+        'comparing models never generates anything and never spends money: do not submit a sample generation to ' +
+        'inspect a model.',
       inputSchema: modelsListInput,
-      outputSchema: modelsListSchema
+      outputSchema: discoveredCatalogSchema
     },
     async (args: z.infer<typeof modelsListInput>) =>
-      wrap('higgsfield.models.list', modelsListSchema, async () => {
+      wrap('higgsfield.models.list', discoveredCatalogSchema, async () => {
         requireScope(context, SCOPES.read);
         const filter = {
           ...(args.type === undefined ? {} : { type: args.type }),
-          ...(args.capability === undefined ? {} : { capability: args.capability })
+          ...(args.capability === undefined ? {} : { capability: args.capability }),
+          ...(args.execution_supported === undefined ? {} : { executionSupported: args.execution_supported })
         };
-        return { models: deps.models.list(filter).map(summarizeModel) };
+        const catalog = await deps.discovery.list(filter);
+        const structured: { models: unknown[]; catalog: WireCatalog } = {
+          models: catalog.models.map(serializeDiscoveredSummary),
+          catalog: serializeCatalog(catalog.catalog)
+        };
+        return structured as unknown as Record<string, unknown>;
       })
   );
 
@@ -406,14 +387,17 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     'higgsfield.models.get',
     {
       title: 'Get model',
-      description: 'Return one model definition including its published input schema and limits.',
+      description:
+        'Read-only. Return one documented model: its endpoint, the documented input schema when it could be read, its ' +
+        'execution support verdict and the documentation URL it came from. Reading a model never generates anything ' +
+        'and never spends money.',
       inputSchema: modelsGetInput,
-      outputSchema: modelSchema
+      outputSchema: discoveredModelResultSchema
     },
     async (args: z.infer<typeof modelsGetInput>) =>
-      wrap('higgsfield.models.get', modelSchema, async () => {
+      wrap('higgsfield.models.get', discoveredModelResultSchema, async () => {
         requireScope(context, SCOPES.read);
-        return serializeModel(deps.models.get(args.model)) as unknown as Record<string, unknown>;
+        return serializeDiscoveredResult(await deps.discovery.get(args.model)) as unknown as Record<string, unknown>;
       })
   );
 
@@ -525,21 +509,27 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
   server.registerResource(
     'models',
     RESOURCE_URIS.models,
-    { title: 'Registered models', mimeType: 'application/json', cacheHint: { ttlMs: 60_000, cacheScope: 'public' } },
+    { title: 'Documented models', mimeType: 'application/json', cacheHint: { ttlMs: 60_000, cacheScope: 'public' } },
     async (uri) => {
       requireScope(context, SCOPES.read);
-      return resourceContents(uri, modelsListSchema, { models: deps.models.list().map(summarizeModel) });
+      const catalog = await deps.discovery.list();
+      const structured = {
+        models: catalog.models.map(serializeDiscoveredSummary),
+        catalog: serializeCatalog(catalog.catalog)
+      };
+      return resourceContents(uri, discoveredCatalogSchema, structured as unknown as Record<string, unknown>);
     }
   );
 
   server.registerResource(
     'model',
     new ResourceTemplate(RESOURCE_URIS.modelTemplate, { list: undefined }),
-    { title: 'Model definition', mimeType: 'application/json', cacheHint: { ttlMs: 60_000, cacheScope: 'public' } },
+    { title: 'Documented model', mimeType: 'application/json', cacheHint: { ttlMs: 60_000, cacheScope: 'public' } },
     async (uri, variables) => {
       requireScope(context, SCOPES.read);
       const id = decodeURIComponent(String(variables['id']));
-      return resourceContents(uri, modelSchema, serializeModel(deps.models.get(id)) as unknown as Record<string, unknown>);
+      const result = await deps.discovery.get(id);
+      return resourceContents(uri, discoveredModelResultSchema, serializeDiscoveredResult(result) as unknown as Record<string, unknown>);
     }
   );
 

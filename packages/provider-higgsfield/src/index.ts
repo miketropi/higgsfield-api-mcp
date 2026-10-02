@@ -84,6 +84,45 @@ export type {
   ValidatedCatalogRegistry
 } from './models/catalog.js';
 
+export {
+  DISCOVERY_CACHE_TTL_MS,
+  DISCOVERY_CONCURRENCY,
+  DISCOVERY_PRODUCTION_HOST,
+  DISCOVERY_STALE_MAX_AGE_MS,
+  DISCOVERY_WARNING_LIMIT,
+  createModelDiscovery
+} from './models/discovery.js';
+export type { ModelDiscoveryOptions } from './models/discovery.js';
+
+export {
+  DEFAULT_DOCUMENTATION_FETCH_LIMITS,
+  DOCUMENTATION_INDEX_URL,
+  DOCUMENTATION_ORIGIN,
+  DOCUMENTATION_PATH_PREFIX,
+  DocumentationFetchError,
+  canonicalDocumentationUrl,
+  createDocumentationFetcher,
+  isAllowedDocumentationUrl
+} from './models/docs-fetch.js';
+export type {
+  DocumentationFetchFailure,
+  DocumentationFetcher,
+  DocumentationFetcherOptions,
+  DocumentationFetchLimits
+} from './models/docs-fetch.js';
+
+export {
+  canonicalSchemaJson,
+  extractCompleteSchema,
+  extractEndpointMetadata,
+  extractLinks,
+  findSection,
+  firstHeadingTitle,
+  parseWorkflowTable,
+  schemaReferenceProblem
+} from './models/docs-parse.js';
+export type { DocumentedLink, EndpointMetadata, SchemaExtraction, WorkflowTableRow } from './models/docs-parse.js';
+
 export { cloneJsonValue, isRecord, validateAgainstJsonSchema } from './models/validate.js';
 export type { SchemaValidationIssue } from './models/validate.js';
 

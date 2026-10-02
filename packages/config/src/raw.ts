@@ -83,7 +83,6 @@ export interface RawConfig {
   };
   features: {
     agentApi: boolean;
-    dynamicModels: boolean;
     webhooks?: boolean | undefined;
   };
   workers: {
@@ -153,7 +152,7 @@ export function createRawConfig(): RawConfig {
       otlpEndpoint: undefined,
       serviceName: defaults.observability.serviceName
     },
-    features: { agentApi: defaults.features.agentApi, dynamicModels: defaults.features.dynamicModels, webhooks: undefined },
+    features: { agentApi: defaults.features.agentApi, webhooks: undefined },
     workers: {
       enabled: defaults.workers.enabled,
       pollIntervalFloorMs: defaults.workers.pollIntervalFloorMs,

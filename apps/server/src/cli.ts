@@ -233,17 +233,45 @@ async function runDoctor(spec: CommandSpec): Promise<number> {
   return failures === 0 ? EXIT_OK : EXIT_FAILURE;
 }
 
+/**
+ * Reports the same catalog the MCP `higgsfield.models.list` surface publishes, so the
+ * CLI and the server can never contradict each other. Execution support is printed
+ * explicitly: a documented workflow this gateway cannot run is not a runnable model.
+ */
 async function runModels(spec: CommandSpec): Promise<number> {
   const config = loadGatewayConfig(spec, []);
   const container = await createContainer(config);
-  for (const model of container.registry.list()) {
+  try {
+    const { models, catalog } = await container.discovery.list();
     out(
-      `${model.id}\t${model.type}\t${model.status}\t${model.endpoint}\t${model.capabilities.join(',')}` +
-        `\tsource=${model.source.url}`
+      `catalog\t${catalog.source}\t${catalog.source_url}\tfetched_at=${catalog.fetched_at}` +
+        `\tstale=${String(catalog.stale)}\ttotal=${catalog.total}\treturned=${catalog.returned}`
     );
+    for (const warning of catalog.warnings) out(`warn ${warning}`);
+    for (const model of models) {
+      const execution = model.execution.supported
+        ? 'supported'
+        : `unsupported:${model.execution.reason ?? 'unknown'}`;
+      out(
+        [
+          model.id,
+          model.type,
+          model.endpoint ?? '(undocumented)',
+          execution,
+          `schema=${model.schemaStatus}`,
+          `capabilities=${model.capabilities.length === 0 ? '(none verified)' : model.capabilities.join(',')}`,
+          `source=${model.source.url}`
+        ].join('\t')
+      );
+    }
+    return EXIT_OK;
+  } catch (error) {
+    err(`models: ${describeError(error)}`);
+    err('model discovery reads the public Higgsfield documentation directory; check access to https://docs.higgsfield.ai');
+    return EXIT_FAILURE;
+  } finally {
+    await container.shutdown();
   }
-  await container.shutdown();
-  return EXIT_OK;
 }
 
 function runSkillsList(spec: CommandSpec): number {

@@ -132,7 +132,6 @@ function mergeConfigFile(raw: RawConfig, file: ConfigFileData): void {
   const features = file.features;
   if (features !== undefined) {
     if (features.agentApi !== undefined) raw.features.agentApi = features.agentApi;
-    if (features.dynamicModels !== undefined) raw.features.dynamicModels = features.dynamicModels;
     if (features.webhooks !== undefined) raw.features.webhooks = features.webhooks;
   }
 
@@ -368,7 +367,6 @@ export function loadConfig(input: LoadConfigInput = {}): GatewayConfig {
     },
     features: {
       agentApi: raw.features.agentApi,
-      dynamicModels: raw.features.dynamicModels,
       webhooks: raw.features.webhooks ?? (raw.server.publicUrl !== undefined)
     },
     workers: {

@@ -89,7 +89,6 @@ export const ENV_SPECS: readonly EnvSpec[] = [
   { key: 'OTEL_EXPORTER_OTLP_ENDPOINT', path: 'observability.otlpEndpoint', parse: url },
   { key: 'HF_MCP_SERVICE_NAME', path: 'observability.serviceName', parse: text(128) },
   { key: 'HF_MCP_EXPERIMENTAL_AGENT_API', path: 'features.agentApi', parse: flag },
-  { key: 'HF_MCP_EXPERIMENTAL_DYNAMIC_MODELS', path: 'features.dynamicModels', parse: flag },
   { key: 'HF_MCP_WEBHOOKS_ENABLED', path: 'features.webhooks', parse: flag },
   { key: 'HF_MCP_WORKERS_ENABLED', path: 'workers.enabled', parse: flag },
   { key: 'HF_MCP_POLL_INTERVAL_FLOOR_MS', path: 'workers.pollIntervalFloorMs', parse: integer(MILLIS) },

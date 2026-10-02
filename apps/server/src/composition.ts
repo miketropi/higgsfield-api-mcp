@@ -10,6 +10,7 @@ import type {
   JobService,
   LoggerPort,
   MediaService,
+  ModelDiscovery,
   ModelRegistry,
   ObjectStore,
   ProviderFactory,
@@ -42,11 +43,13 @@ import { loadModelAliasesFile, loadRateLimitsFile, loadTenantsFile } from '@higg
 import { createLogger, createMetrics, initTracing, type GatewayMetrics, type TracingHandle } from '@higgsfield-mcp/observability';
 import {
   createHiggsfieldProviderFactory,
+  createModelDiscovery,
   HIGGSFIELD_ADAPTER_VERSION,
   HIGGSFIELD_PROVIDER_ID,
   loadBundledCatalog
 } from '@higgsfield-mcp/provider-higgsfield';
 import type { GatewayCapabilitiesInfo, McpToolDependencies } from '@higgsfield-mcp/mcp';
+import { TOOL_NAMES } from '@higgsfield-mcp/mcp';
 import { createAuthService, httpRequestContext, type AuthService } from './auth.js';
 import { createCredentialResolver } from './tenants.js';
 import { resolveSkillsDir } from './skills-dir.js';
@@ -59,6 +62,8 @@ export interface GatewayContainer {
   repository: JobRepository;
   rateLimiter: RateLimiter;
   registry: ModelRegistry;
+  /** Live documentation discovery; read-only and independent of execution. */
+  discovery: ModelDiscovery;
   providerFactory: ProviderFactory;
   credentials: CredentialResolver;
   media: MediaService;
@@ -157,6 +162,11 @@ export async function createContainer(
     aliases,
     ...(pricing === undefined ? {} : { pricing })
   });
+
+  // Discovery reads the provider's public documentation lazily on the first
+  // models.list/get: process startup, tools/list, job reconciliation and every
+  // generation call stay independent of that public site.
+  const discovery = createModelDiscovery({ manifest: registry, clock, logger });
 
   let objectStore: ObjectStore | undefined;
   if (config.storage.bucket !== undefined) {
@@ -317,6 +327,7 @@ export async function createContainer(
     provider: { id: HIGGSFIELD_PROVIDER_ID, version: HIGGSFIELD_ADAPTER_VERSION },
     skillsVersion: readSkillsVersion(resolveSkillsDir(config.skillsDir)),
     capabilities: defaultCapabilityList(registry),
+    tools: { names: [...TOOL_NAMES] },
     auth: { mode: config.auth.mode, scopes: ['higgsfield:read', 'higgsfield:generate', 'higgsfield:upload'] },
     limits: { maxWaitMs: 25_000, maxImageJobs: config.limits.maxImageJobs, maxVideoJobs: config.limits.maxVideoJobs }
   };
@@ -326,6 +337,7 @@ export async function createContainer(
     jobs,
     media,
     models: registry,
+    discovery,
     capabilities,
     admission,
     logger,
@@ -375,6 +387,7 @@ export async function createContainer(
     repository,
     rateLimiter,
     registry,
+    discovery,
     providerFactory,
     credentials,
     media,

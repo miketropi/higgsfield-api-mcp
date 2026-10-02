@@ -11,7 +11,7 @@ MCP surface, the provider adapter, and the process that serves them.
 | `packages/config` | `@higgsfield-mcp/config` | Environment/config-file parsing, validation, defaults, precedence, and the tenants / rate-limits / model-aliases file schemas. |
 | `packages/mcp` | `@higgsfield-mcp/mcp` | The MCP wire contract: tool input schemas, the serializer, the tool registrations, and the five resource URIs. |
 | `packages/observability` | `@higgsfield-mcp/observability` | The pino logger, the Prometheus metrics registry, and the OTLP tracer. |
-| `packages/provider-higgsfield` | `@higgsfield-mcp/provider-higgsfield` | The Higgsfield HTTP client, path/URL guards, status/error mapping, and the bundled model catalog. |
+| `packages/provider-higgsfield` | `@higgsfield-mcp/provider-higgsfield` | The Higgsfield HTTP client, path/URL guards, status/error mapping, the bundled model catalog (the execution manifest), and the public-documentation model discovery service. |
 | `packages/skills` | `@higgsfield-mcp/skills` | The upstream skill adapter: manifest loading, patching, validation, upstream drift checks, and the skill CLI. |
 | `apps/server` | `higgsfield-mcp` (published) | The `higgsfield-mcp` binary, the container composition root, both transports, HTTP auth, the webhook handler, and the CLI. |
 
@@ -25,9 +25,16 @@ workspace references and the CLI is a single entry point.
 only cross-package interfaces, and a change there is an architectural change. The ports
 defined in `contracts.ts` are:
 
-`MediaProvider`, `ProviderFactory`, `CredentialResolver`, `ModelRegistry`, `MediaService`,
-`JobRepository`, `JobService`, `GenerationService`, `SubmissionWorker`, `RateLimiter`,
-`CostGuard`, `ObjectStore`, `Clock`, `LoggerPort`, `MetricsPort`.
+`MediaProvider`, `ProviderFactory`, `CredentialResolver`, `ModelRegistry`, `ModelDiscovery`,
+`MediaService`, `JobRepository`, `JobService`, `GenerationService`, `SubmissionWorker`,
+`RateLimiter`, `CostGuard`, `ObjectStore`, `Clock`, `LoggerPort`, `MetricsPort`.
+
+`ModelRegistry` and `ModelDiscovery` are deliberately separate ports. `ModelRegistry` is the
+execution manifest — routing, input validation, provider defaults and the endpoint allowlist
+all read it, and it is the only thing that authorizes a provider call. `ModelDiscovery` reads
+the provider's public documentation directory and is purely informational: it never enables an
+endpoint, and it is fetched lazily on the first `models.list`/`models.get`, so process startup,
+`tools/list`, job reconciliation and every generation call are independent of that site.
 
 Conventions that hold everywhere:
 

@@ -25,6 +25,12 @@
  *   HF_MCP_LIVE_SOUL=1         enable the Soul ID training call in the live profile
  *   HF_MCP_LIVE_SOUL_IMAGE_URL public image URL used as the Soul ID reference
  *
+ * The distribution profile's stdio discovery scenario never reaches the public
+ * documentation site: the harness writes an official-page fixture directory into its
+ * work directory and serves it to the installed CLI through `scripts/e2e/docs-fixture-preload.mjs`
+ * (`HF_MCP_E2E_DOCS_FIXTURE`, injected via `NODE_OPTIONS=--import`). Nothing in the shipped
+ * package is configurable for that host.
+ *
  * Dependencies: Node standard library plus the repo's `tsx` and the MCP client SDK
  * (`@modelcontextprotocol/client`, a root devDependency). No new packages.
  */
@@ -47,6 +53,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import type { ModelDefinition } from '@higgsfield-mcp/core';
+import { docsFixturePages } from '../../tests/fixtures/docs-directory.js';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const artifactsDir = join(repoRoot, 'artifacts');
@@ -714,8 +722,26 @@ async function distributionProfile(): Promise<void> {
     return `version ${version.version}, protocol ${String(version.mcp_protocol)}, doctor clean`;
   });
 
+  // Model discovery reads the provider's public documentation directory. CI has no
+  // internet, so the harness injects an official-page fixture for that one host through a
+  // preload module (see docs-fixture-preload.mjs) and drives the installed binary the
+  // same way it always did. The shipped package keeps its fixed documentation origin.
+  // The fixture documents the *bundled* manifest's schemas, so the installed binary sees
+  // the same execution-support verdicts it would compute against the real site.
+  const bundledRegistry = JSON.parse(
+    readFileSync(join(repoRoot, 'packages', 'provider-higgsfield', 'src', 'models', 'registry.json'), 'utf8')
+  ) as { models: ModelDefinition[] };
+  const docsFixturePath = join(workDir, 'docs-fixture.json');
+  writeFileSync(docsFixturePath, JSON.stringify(docsFixturePages({ manifest: bundledRegistry.models })), 'utf8');
+  const preload = pathToFileURL(join(repoRoot, 'scripts', 'e2e', 'docs-fixture-preload.mjs')).href;
+  const docsEnv: Record<string, string> = {
+    ...installedEnv,
+    HF_MCP_E2E_DOCS_FIXTURE: docsFixturePath,
+    NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --import ${preload}`.trim()
+  };
+
   await step('drive stdio discovery with the real MCP client', `${binary} serve --transport stdio`, async () => {
-    const { client } = await connectStdio(binary, ['serve', '--transport', 'stdio'], installedEnv);
+    const { client } = await connectStdio(binary, ['serve', '--transport', 'stdio'], docsEnv);
     try {
       const tools = await client.listTools();
       const names = tools.tools.map((tool) => tool.name);
@@ -725,9 +751,33 @@ async function distributionProfile(): Promise<void> {
       const models = structured(await client.callTool({ name: 'higgsfield.models.list', arguments: {} }));
       const modelList = models['models'];
       assert(Array.isArray(modelList) && modelList.length > 0, 'higgsfield.models.list returned no models');
+      const catalog = models['catalog'] as Record<string, unknown> | undefined;
+      assert(catalog?.['source'] === 'official_documentation', 'models.list did not report documentation provenance');
+      assert(
+        catalog['source_url'] === 'https://docs.higgsfield.ai/docs/models.md',
+        `unexpected catalog source URL ${String(catalog['source_url'])}`
+      );
+      assert(catalog['stale'] === false, 'the first discovery snapshot must not be stale');
+      const entries = modelList as { id: string; execution: { supported: boolean } }[];
+      const supported = entries.filter((model) => model.execution.supported);
+      assert(supported.length > 0, 'no discovered model reports execution support');
+      const documentedOnly = entries.find((model) => model.id === 'alibaba/qwen-image-3/text-to-image');
+      assert(documentedOnly !== undefined, 'a documented-only workflow is missing from models.list');
+      assert(documentedOnly.execution.supported === false, 'a documented-only workflow claimed execution support');
+
+      const detail = structured(
+        await client.callTool({ name: 'higgsfield.models.get', arguments: { model: 'xai/grok-imagine-image-2.0' } })
+      );
+      assert(detail['execution'] !== undefined, 'models.get returned no execution verdict');
 
       const capabilities = structured(await client.callTool({ name: 'higgsfield.capabilities', arguments: {} }));
       assert(capabilities['mcp_protocol'] === '2026-07-28', `unexpected MCP revision ${String(capabilities['mcp_protocol'])}`);
+      const toolsBlock = capabilities['tools'] as { count: number; names: string[] } | undefined;
+      assert(toolsBlock?.count === names.length, 'capabilities.tools.count does not match tools/list');
+      assert(
+        [...(toolsBlock?.names ?? [])].sort().join(',') === [...names].sort().join(','),
+        'capabilities.tools.names does not match tools/list'
+      );
 
       const resources = await client.listResources();
       const uris = resources.resources.map((resource) => resource.uri);
@@ -735,7 +785,10 @@ async function distributionProfile(): Promise<void> {
         assert(uris.includes(required), `resource ${required} is not registered`);
       }
 
-      return `${String(names.length)} tools, ${String(modelList.length)} models, protocol 2026-07-28, ${String(uris.length)} resources`;
+      return (
+        `${String(names.length)} tools, ${String(modelList.length)} documented models` +
+        ` (${String(supported.length)} executable), protocol 2026-07-28, ${String(uris.length)} resources`
+      );
     } finally {
       await client.close();
     }

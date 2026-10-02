@@ -387,6 +387,111 @@ export interface ModelRegistry {
   aliases(): Record<string, string>;
 }
 
+/**
+ * Live model discovery (SPEC §19): what the provider's public documentation lists
+ * right now, kept deliberately separate from the execution manifest above.
+ *
+ * `ModelRegistry` answers "what may this gateway run?" — it backs routing, input
+ * validation, provider defaults and the endpoint allowlist. `ModelDiscovery`
+ * answers "what does the provider document?" — a superset that must never be
+ * presented as account access, as an active deployment, or as proof that the
+ * gateway can execute the workflow.
+ */
+export const DISCOVERY_SCHEMA_STATUSES = ['available', 'unavailable'] as const;
+export type DiscoverySchemaStatus = (typeof DISCOVERY_SCHEMA_STATUSES)[number];
+
+/** Why a discovered workflow cannot be executed through this gateway. */
+export type DiscoveryExecutionReason =
+  /** No adapter: the endpoint is absent from the execution manifest. */
+  | 'adapter_not_implemented'
+  /** The documented page publishes no usable schema. */
+  | 'schema_unavailable'
+  /** The documented schema no longer matches the manifest's input schema. */
+  | 'schema_changed'
+  /** Documented for a provider origin this gateway is not configured to call. */
+  | 'environment_not_supported'
+  /** No endpoint id could be verified for this workflow. */
+  | 'endpoint_unverified'
+  /** Sources published conflicting endpoint identifiers for one workflow. */
+  | 'endpoint_conflict';
+
+/** Documentation provenance of one discovered record. */
+export interface DiscoveryProvenance {
+  /** Canonical documentation URL the record was read from. */
+  url: string;
+  /** Every canonical URL that documented the same record, in discovery order. */
+  urls: string[];
+  fetchedAt: string;
+}
+
+export interface DiscoveryExecution {
+  supported: boolean;
+  reason?: DiscoveryExecutionReason | undefined;
+}
+
+export interface DiscoveredModel {
+  /** Endpoint id, or the preserved execution identifier / documentation URL. */
+  id: string;
+  name: string;
+  type: ModelType;
+  /** Documented endpoint id; `null` when the page publishes none. */
+  endpoint: string | null;
+  /** Verified capabilities only: `[]` for endpoints with no execution manifest entry. */
+  capabilities: string[];
+  inputSchema?: Record<string, unknown> | undefined;
+  /** Copied from the execution manifest; absent when the manifest has no entry. */
+  limits?: ModelLimits | undefined;
+  /** Copied from the execution manifest (operator overrides included). */
+  pricing?: PricingDefinition | undefined;
+  schemaStatus: DiscoverySchemaStatus;
+  /** Human-readable reason when the schema is unavailable or unusable. */
+  schemaReason?: string | undefined;
+  /** Documentation presence only — never account entitlement. */
+  availability: 'documented';
+  /** Always unverified: discovery cannot see the caller's account. */
+  accountAccess: 'unverified';
+  execution: DiscoveryExecution;
+  source: DiscoveryProvenance;
+}
+
+/** Metadata for one discovery snapshot, plus how the current filter narrowed it. */
+export interface CatalogMetadata {
+  source: 'official_documentation';
+  sourceUrl: string;
+  fetchedAt: string;
+  /** True when the snapshot was served after a failed refresh. */
+  stale: boolean;
+  /** Every discovered record in the snapshot, before filtering. */
+  total: number;
+  /** Records returned after filtering. */
+  returned: number;
+  warnings: string[];
+}
+
+export interface DiscoveredCatalog {
+  models: DiscoveredModel[];
+  catalog: CatalogMetadata;
+}
+
+export interface DiscoveredModelResult {
+  model: DiscoveredModel;
+  catalog: CatalogMetadata;
+}
+
+export interface DiscoveryFilter extends ModelFilter {
+  /** `true` returns only entries this gateway can execute; `false` only the rest. */
+  executionSupported?: boolean | undefined;
+}
+
+/**
+ * Read-only discovery port. Implemented by the provider adapter over the provider's
+ * public documentation directory; never over the authenticated provider client.
+ */
+export interface ModelDiscovery {
+  list(filter?: DiscoveryFilter): Promise<DiscoveredCatalog>;
+  get(id: string): Promise<DiscoveredModelResult>;
+}
+
 export interface ServiceCapabilities {
   provider: string;
   capabilities: string[];

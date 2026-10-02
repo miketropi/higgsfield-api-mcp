@@ -56,7 +56,6 @@ const DOCUMENTED_ENV_KEYS = [
   'OTEL_EXPORTER_OTLP_ENDPOINT',
   'HF_MCP_SERVICE_NAME',
   'HF_MCP_EXPERIMENTAL_AGENT_API',
-  'HF_MCP_EXPERIMENTAL_DYNAMIC_MODELS',
   'HF_MCP_WEBHOOKS_ENABLED',
   'HF_MCP_WORKERS_ENABLED',
   'HF_MCP_POLL_INTERVAL_FLOOR_MS',
@@ -152,7 +151,6 @@ const MAPPING_ROWS: MappingRow[] = [
   { key: 'OTEL_EXPORTER_OTLP_ENDPOINT', path: 'observability.otlpEndpoint', value: 'http://collector.internal:4318/v1/traces', expected: 'http://collector.internal:4318/v1/traces' },
   { key: 'HF_MCP_SERVICE_NAME', path: 'observability.serviceName', value: 'gateway-edge', expected: 'gateway-edge' },
   { key: 'HF_MCP_EXPERIMENTAL_AGENT_API', path: 'features.agentApi', value: 'true', expected: true },
-  { key: 'HF_MCP_EXPERIMENTAL_DYNAMIC_MODELS', path: 'features.dynamicModels', value: 'true', expected: true },
   {
     key: 'HF_MCP_WEBHOOKS_ENABLED',
     path: 'features.webhooks',

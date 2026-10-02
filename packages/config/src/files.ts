@@ -107,7 +107,7 @@ export const configFileSchema = z.strictObject({
     })
     .optional(),
   features: z
-    .strictObject({ agentApi: z.boolean().optional(), dynamicModels: z.boolean().optional(), webhooks: z.boolean().optional() })
+    .strictObject({ agentApi: z.boolean().optional(), webhooks: z.boolean().optional() })
     .optional(),
   workers: z
     .strictObject({

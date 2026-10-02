@@ -34,10 +34,12 @@ From `skills/manifest.json`, pinned to `higgsfield-ai/skills@f83af0bc1d937c81190
 
 See [skills.md](skills.md) for the full reasoning and the pinning workflow.
 
-## Model catalog
+## Execution manifest (what this gateway may run)
 
 `packages/provider-higgsfield/src/models/registry.json`, `catalogVersion` `2026-10-02.1`,
-`asOf` `2026-10-02`.
+`asOf` `2026-10-02`. This file is the *execution* manifest: routing defaults, input
+validation, provider defaults, pricing overrides and the endpoint allowlist are all derived
+from it, and only these endpoints can be submitted.
 
 | Model id | Type | Status | Endpoint | Capabilities |
 |---|---|---|---|---|
@@ -49,28 +51,56 @@ See [skills.md](skills.md) for the full reasoning and the pinning workflow.
 | `bytedance/seedance-2.5/reference-to-video` | video | active | `bytedance/seedance-2.5/reference-to-video` | reference_to_video, reference_images, audio_generation |
 | `soul-id` | image | active | `v1/custom-references` | custom_reference_training, identity_generation |
 
-`alibaba/qwen-image-3/text-to-image` is authored as its sibling `…/edit` in the same upstream
-page and is not in the catalog.
+## Discovered models (what the provider documents)
 
-The catalog is bundled into the CLI at build time; `HF_MCP_EXPERIMENTAL_DYNAMIC_MODELS` is
-reserved and does not currently fetch a catalog at run time.
+`higgsfield.models.list`, `higgsfield.models.get` and the `higgsfield://models` resources do
+**not** read the manifest. They walk the provider's public documentation directory
+(`https://docs.higgsfield.ai/docs/models.md` → category → model family → workflow), so the
+surface follows the published catalog without a release: today that is 35 model families and
+~83 workflows, an order of magnitude more than the gateway can run.
 
-## Deliberately unavailable endpoints
+Each discovered record states its own provenance and its execution verdict:
 
-These are named in the upstream API reference but are not exposed, so `higgsfield.models.get`
-returns `MODEL_NOT_FOUND` for them (and `higgsfield.models.list` never includes them):
-
-| Endpoint id | Reason |
+| Field | Meaning |
 |---|---|
-| `higgsfield-ai/soul/standard` | Listed in the API reference index and a documented consumer of `custom_reference_id`, but the parameter schema was not captured; excluded rather than guessed. |
-| `higgsfield-ai/soul/v2/standard` | Same as above. |
-| `alibaba/qwen-image-3/text-to-image` | Named as a sibling of `…/edit`; no parameter schema was captured. |
-| `kling-video/v2.5-turbo/standard/image-to-video` | Present only in the supplementary `openapi.json`, which is explicitly not the authoritative catalog. |
-| `minimax/hailuo-2.3/standard/image-to-video` | Present only in the supplementary `openapi.json`; no authoritative model page schema. |
-| `minimax/hailuo-2.3/standard/text-to-video` | Same as above. |
+| `source.url` / `source.urls` | The canonical documentation page(s) it was read from, plus `fetched_at`. |
+| `schema_status` | `available` only when the workflow's `Complete JSON schema` accordion parsed and used local `$ref`s only; otherwise `unavailable` with `schema_reason`. |
+| `execution.supported` | `true` only for a production endpoint that is in the execution manifest **and** whose documented schema still matches the manifest's input schema structurally. |
+| `execution.reason` | Otherwise why not: `adapter_not_implemented`, `schema_unavailable`, `schema_changed`, `environment_not_supported`, `endpoint_unverified`, `endpoint_conflict`. |
+| `availability` / `account_access` | Always `documented` / `unverified`: documentation presence is not account entitlement. |
+| `capabilities` | From the execution manifest, or `[]` — never guessed from a name or a schema field. |
 
-Each entry carries its own source URL and `asOf` date in the registry file. `higgsfield.generate`
-accepts only catalog endpoint ids, so these paths are unreachable rather than merely unlisted.
+`catalog` on every response reports `source_url`, `fetched_at`, `stale`, `total`, `returned`
+and bounded `warnings`, so a caller can tell a fresh catalog from a stale one.
+
+Notes:
+
+* Documentation is read lazily on the first discovery call, cached in memory for ten minutes,
+  and refreshed single-flight. A refresh failure serves the last complete snapshot (`stale:
+  true`) for up to 24 hours; after that, discovery fails with `PROVIDER_ERROR`
+  (`details.reason: catalog_unavailable`). Generation, job reconciliation and `tools/list`
+  never depend on that site, and discovery never falls back to the bundled manifest while
+  claiming to be live.
+* Discovery is read-only: it never enables an endpoint, never submits generation and never
+  spends. `higgsfield.generate` still refuses any endpoint outside the execution manifest.
+* `alibaba/qwen-image-3/text-to-image` and the other endpoints below are documented upstream,
+  so they now appear in `higgsfield.models.list` with `execution.supported: false`; they are
+  still rejected by `higgsfield.generate`. Endpoints named only in the supplementary
+  `openapi.json` are not discovered at all, because that file is explicitly not the
+  authoritative catalog.
+* `higgsfield-mcp models` prints the same discovered catalog, so the CLI and the MCP surface
+  cannot contradict each other.
+
+| Endpoint id | Reported reason |
+|---|---|
+| `higgsfield-ai/soul/standard` | `adapter_not_implemented`: documented consumer of `custom_reference_id`, but the manifest has no adapter entry. |
+| `higgsfield-ai/soul/v2/standard` | Same as above. |
+| `alibaba/qwen-image-3/edit` | `schema_changed`: the documented schema now wraps its conditional rule in `allOf`, which the manifest does not mirror; the manifest schema stays the generation contract pending a reviewed adapter update. |
+| `v1/custom-references` | `execution.supported: true` under its preserved public id `soul-id`. |
+
+Each execution-manifest entry carries its own source URL and `asOf` date in the registry file.
+`higgsfield.generate` accepts only manifest endpoint ids, so a documented-but-unsupported
+workflow is unreachable rather than merely unlisted.
 
 ## Distribution and runtime
 

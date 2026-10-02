@@ -237,7 +237,9 @@ the order they are printed (`runDoctor` in `apps/server/src/cli.ts`):
 Then verify through the host: an empty tool list means the host could not start the process —
 re-check `command`, `args[0]`, and that the prefix actually exists. A first call to
 `higgsfield.models.list` is free and proves the round trip; `higgsfield.generate_image` is
-billable.
+billable. `models.list` is the only surface that needs outbound access to
+`https://docs.higgsfield.ai`; generation, job handling and `tools/list` work without it, and a
+discovery outage surfaces as `PROVIDER_ERROR` with `details.reason: catalog_unavailable`.
 
 ## Local file inputs
 

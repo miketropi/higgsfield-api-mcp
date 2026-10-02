@@ -140,7 +140,6 @@ export interface ObservabilityConfig {
 
 export interface FeatureFlags {
   agentApi: boolean;
-  dynamicModels: boolean;
   webhooks: boolean;
 }
 

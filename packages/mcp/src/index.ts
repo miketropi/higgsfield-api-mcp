@@ -4,10 +4,22 @@ export {
   errorEnvelope,
   jsonText,
   serializeAsset,
+  serializeCatalog,
+  serializeDiscoveredModel,
+  serializeDiscoveredResult,
+  serializeDiscoveredSummary,
   serializeError,
   serializeJob
 } from './serialize.js';
-export type { WireAsset, WireCapabilities, WireError, WireJob, WireModel } from './serialize.js';
+export type {
+  WireAsset,
+  WireCapabilities,
+  WireCatalog,
+  WireDiscoveredModel,
+  WireDiscoveredSummary,
+  WireError,
+  WireJob
+} from './serialize.js';
 export {
   RESOURCE_URIS,
   SCOPES,

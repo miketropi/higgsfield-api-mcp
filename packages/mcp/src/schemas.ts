@@ -93,7 +93,12 @@ export const mediaUploadInput = z
 
 export const mediaGetInput = z.object({ asset_id: z.string().min(1) }).strict();
 export const modelsListInput = z
-  .object({ type: z.enum(['image', 'video', 'audio', '3d']).optional(), capability: z.string().optional() })
+  .object({
+    type: z.enum(['image', 'video', 'audio', '3d']).optional(),
+    capability: z.string().optional(),
+    /** `true` limits the list to entries this gateway can actually run. */
+    execution_supported: z.boolean().optional()
+  })
   .strict();
 export const modelsGetInput = z.object({ model: z.string().min(1) }).strict();
 export const jobsGetInput = z.object({ job_id: z.string().min(1) }).strict();

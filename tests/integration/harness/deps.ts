@@ -2,12 +2,14 @@ import type {
   GatewayCapabilitiesInfo,
   McpToolDependencies
 } from '@higgsfield-mcp/mcp';
+import { TOOL_NAMES } from '@higgsfield-mcp/mcp';
 import type {
   GenerationService,
   JobRepository,
   JobService,
   MediaService,
   MetricsPort,
+  ModelDiscovery,
   ModelRegistry,
   RequestContext,
   SubmissionWorker
@@ -24,8 +26,11 @@ import {
   createModelRegistry,
   createSubmissionWorker
 } from '@higgsfield-mcp/core';
+import { createModelDiscovery } from '@higgsfield-mcp/provider-higgsfield';
 import { TEST_CATALOG, createFakeMediaService, createFakeProvider, createNullMetrics, createSilentLogger } from '../../fixtures/fakes.js';
 import type { FakeProvider, FakeProviderOptions, RecordingLogger } from '../../fixtures/fakes.js';
+import { createDocsFixture } from '../../fixtures/docs-directory.js';
+import type { DocsFixture } from '../../fixtures/docs-directory.js';
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
@@ -37,11 +42,15 @@ export interface TestMetrics extends MetricsPort {
 export interface TestDepsOptions {
   provider?: FakeProviderOptions | undefined;
   localFileAccess?: boolean | undefined;
+  /** Documentation directory fixture; defaults to the manifest-derived official-page fixture. */
+  docs?: DocsFixture | undefined;
 }
 
 export interface TestDeps {
   repository: JobRepository;
   registry: ModelRegistry;
+  discovery: ModelDiscovery;
+  docs: DocsFixture;
   provider: FakeProvider;
   media: MediaService;
   jobs: JobService;
@@ -61,6 +70,7 @@ export interface TestDeps {
 export function createTestDeps(options: TestDepsOptions = {}): TestDeps {
   const repository = createMemoryJobRepository();
   const registry = createModelRegistry({ models: TEST_CATALOG });
+  const docs = options.docs ?? createDocsFixture({ manifest: TEST_CATALOG });
   const provider = createFakeProvider(options.provider);
   const logger = createSilentLogger();
   const metrics: TestMetrics = {
@@ -71,6 +81,7 @@ export function createTestDeps(options: TestDepsOptions = {}): TestDeps {
     contentType: 'text/plain; version=0.0.4'
   };
   const clock = { now: () => new Date() };
+  const discovery = createModelDiscovery({ manifest: registry, fetch: docs.fetch, clock });
   const providerFactory = {
     providerId: 'higgsfield',
     async forContext() {
@@ -162,6 +173,7 @@ export function createTestDeps(options: TestDepsOptions = {}): TestDeps {
     provider: { id: 'higgsfield', version: provider.version },
     skillsVersion: 'unavailable',
     capabilities: ['image_generation', 'image_edit', 'text_to_video', 'image_to_video', 'reference_to_video'],
+    tools: { names: [...TOOL_NAMES] },
     auth: { mode: 'none', scopes: ['higgsfield:read', 'higgsfield:generate', 'higgsfield:upload'] },
     limits: { maxWaitMs: 25_000, maxImageJobs: 2, maxVideoJobs: 1 }
   };
@@ -185,6 +197,7 @@ export function createTestDeps(options: TestDepsOptions = {}): TestDeps {
     jobs,
     media,
     models: registry,
+    discovery,
     capabilities,
     admission,
     logger,
@@ -193,6 +206,8 @@ export function createTestDeps(options: TestDepsOptions = {}): TestDeps {
   return {
     repository,
     registry,
+    discovery,
+    docs,
     provider,
     media,
     jobs,

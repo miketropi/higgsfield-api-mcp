@@ -73,7 +73,6 @@ means "not set". Array-valued keys are comma-separated. Defaults are from
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `observability.otlpEndpoint` | — | OTLP/HTTP trace endpoint. Tracing stays off when unset. |
 | `HF_MCP_SERVICE_NAME` | `observability.serviceName` | `higgsfield-mcp` | Service name on log records and the `service` metric label. |
 | `HF_MCP_EXPERIMENTAL_AGENT_API` | `features.agentApi` | `false` | Reserved feature flag; no Agent API code path exists. |
-| `HF_MCP_EXPERIMENTAL_DYNAMIC_MODELS` | `features.dynamicModels` | `false` | Reserved feature flag; the catalog is the bundled one. |
 | `HF_MCP_WEBHOOKS_ENABLED` | `features.webhooks` | `false` (but see derivations) | Attach a callback URL to provider submissions. |
 | `HF_MCP_WORKERS_ENABLED` | `workers.enabled` | `true` | Run the submission/polling worker in this process. |
 | `HF_MCP_POLL_INTERVAL_FLOOR_MS` | `workers.pollIntervalFloorMs` | `2000` | Minimum poll interval. |

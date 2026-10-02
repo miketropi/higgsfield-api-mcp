@@ -103,7 +103,6 @@ export const gatewayConfigSchema = z.strictObject({
   }),
   features: z.strictObject({
     agentApi: z.boolean(),
-    dynamicModels: z.boolean(),
     webhooks: z.boolean()
   }),
   workers: z.strictObject({
