@@ -47,6 +47,17 @@ import type { WireCapabilities, WireModel } from './serialize.js';
 const DEFAULT_WAIT_MS = 20_000;
 
 /**
+ * Appended to every billable generation tool description. Agents read these strings
+ * verbatim, so the guidance has to live here: without it a caller can invent a paid
+ * subject the user never asked for and submit it in one step.
+ */
+const BILLABLE_BRIEFING =
+  'The prompt is the user\'s brief: never invent a subject the user did not ask for — ask for one instead. ' +
+  'The call is billable; report the returned cost estimate. When a cost guard is configured this tool returns ' +
+  'status "confirmation_required" with confirmation_token instead of submitting, and the same request must be ' +
+  'resubmitted with that token to proceed.';
+
+/**
  * Admission class per non-generation tool. Generation tools are deliberately absent:
  * `GenerationService` admits them with the model-derived class, so a native
  * `higgsfield.generate` call cannot bypass the video ceiling.
@@ -230,7 +241,8 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     {
       title: 'Generate image',
       description:
-        'Generate an image from a prompt, optionally with reference images. Returns a job object immediately unless wait=true.',
+        'Generate an image from a prompt, optionally with reference images. Returns a job object immediately unless wait=true. ' +
+        BILLABLE_BRIEFING,
       inputSchema: generateImageInput,
       outputSchema: generationResultSchema
     },
@@ -249,7 +261,9 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     'higgsfield.edit_image',
     {
       title: 'Edit image',
-      description: 'Edit or restyle an existing image using a prompt and up to three ordered references.',
+      description:
+        'Edit or restyle an existing image using a prompt and up to three ordered references. ' +
+        BILLABLE_BRIEFING,
       inputSchema: editImageInput,
       outputSchema: generationResultSchema
     },
@@ -269,7 +283,8 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     {
       title: 'Generate video',
       description:
-        'Generate a video from a prompt, optionally with a start frame, end frame or references. The gateway selects the documented endpoint that supports the inputs you send.',
+        'Generate a video from a prompt, optionally with a start frame, end frame or references. The gateway selects the documented endpoint that supports the inputs you send. ' +
+        BILLABLE_BRIEFING,
       inputSchema: generateVideoInput,
       outputSchema: generationResultSchema
     },
@@ -288,7 +303,7 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     'higgsfield.animate_image',
     {
       title: 'Animate image',
-      description: 'Animate a still image into a short video (image-to-video).',
+      description: 'Animate a still image into a short video (image-to-video). ' + BILLABLE_BRIEFING,
       inputSchema: animateImageInput,
       outputSchema: generationResultSchema
     },
@@ -308,7 +323,8 @@ export function createGatewayMcpServer(deps: McpToolDependencies, context: Reque
     {
       title: 'Provider-native generation',
       description:
-        'Submit a request to a registered provider endpoint with provider-native fields. The endpoint must be present in higgsfield.models.list.',
+        'Submit a request to a registered provider endpoint with provider-native fields. The endpoint must be present in higgsfield.models.list. ' +
+        BILLABLE_BRIEFING,
       inputSchema: generateInput,
       outputSchema: generationResultSchema
     },

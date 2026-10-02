@@ -17,6 +17,16 @@ These four fields are accepted by the generation tools (`higgsfield.generate_ima
 | `workspace_id` | string | Attached to the job and used to scope job listings. |
 | `confirmation_token` | string | Resumes a request that previously returned `confirmation_required`. |
 
+### Cost and the prompt
+
+These tools are billable. `prompt` is the user's brief: a caller must not invent a subject
+nobody asked for — ask for one instead. Every generation response carries the estimate
+(`cost.estimated_cost_usd`, `cost.source` = `estimate_api` or `operator_override`). When
+`HF_MCP_REQUIRE_CONFIRM_ABOVE_USD` is configured, a request above the threshold returns
+`status: "confirmation_required"` with an estimate and a single-use token instead of
+submitting; resubmit the identical request with `confirmation_token` to proceed. The token is
+bound to the tenant, tool and exact payload, and expires (10 minutes by default).
+
 ### Media references
 
 Every media input is a discriminated union:
