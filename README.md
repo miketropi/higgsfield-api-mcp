@@ -1,5 +1,7 @@
 # Higgsfield MCP Gateway
 
+![Higgsfield MCP Gateway](docs/thumbnail.jpg)
+
 An MCP server that gives MCP-compatible agents the Higgsfield generative media API: image
 generation and editing, video generation and animation, media upload, a model catalog, and
 job inspection — over stdio or Streamable HTTP, with structured errors, cost controls,
