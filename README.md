@@ -1,6 +1,6 @@
-# Higgsfield MCP Gateway
+# Higgsfield API MCP Gateway
 
-![Higgsfield MCP Gateway](docs/thumbnail.jpg)
+![Higgsfield API MCP Gateway](docs/thumbnail.jpg)
 
 An MCP server that gives MCP-compatible agents the Higgsfield generative media API: image
 generation and editing, video generation and animation, media upload, a model catalog, and
@@ -17,58 +17,129 @@ the gateway handles models, media, jobs, provider execution, security and observ
 ## Requirements
 
 - Node.js >= 22 (`engines` in [`package.json`](package.json))
-- Higgsfield API credentials, formatted `Key <id>:<secret>`
+- Higgsfield API credentials. The dashboard shows `<id>:<secret>`; the API expects the header
+  form `Key <id>:<secret>` and the gateway accepts either.
 - Docker is **not** required for local stdio use. PostgreSQL and Redis are only needed for
   remote (HTTP) deployments.
+
+## Install
+
+The npm package is **not published to the registry** — install it from this repository
+(`https://github.com/miketropi/higgsfield-api-mcp`). The layout below puts the installed
+package at `~/.local/share/higgsfield-mcp/node_modules/higgsfield-mcp`, which is what the
+host configuration further down points at.
+
+```bash
+# 1. source
+git clone https://github.com/miketropi/higgsfield-api-mcp ~/.local/share/higgsfield-mcp-src
+cd ~/.local/share/higgsfield-mcp-src
+
+# 2. build the packages and the CLI, then pack the npm tarball
+corepack enable
+pnpm install --frozen-lockfile
+pnpm -r run build
+pnpm --filter higgsfield-mcp pack --pack-destination "$PWD/artifacts"
+
+# 3. install into the prefix your host will launch, and create the local input root
+mkdir -p ~/.local/share/higgsfield-mcp/inputs
+npm install --prefix ~/.local/share/higgsfield-mcp "$PWD/artifacts/higgsfield-mcp-0.1.0.tgz"
+```
+
+That produces the binary at
+`~/.local/share/higgsfield-mcp/node_modules/.bin/higgsfield-mcp` (a shim for
+`node_modules/higgsfield-mcp/dist/cli.js`).
+
+Alternatives:
+
+- **Release tarball**, once a tagged release exists:
+  `npm install --prefix ~/.local/share/higgsfield-mcp https://github.com/miketropi/higgsfield-api-mcp/releases/download/v0.1.0/higgsfield-mcp-0.1.0.tgz`
+- **Container**: `docker build -t higgsfield-mcp:verify .` (non-root, read-only root, SIGTERM).
+- **No install at all**, from a working checkout: point the host at
+  `node <checkout>/apps/server/dist/cli.js serve --transport stdio`.
 
 ## Quick start
 
 The sequence below reaches a first successful generation in about five minutes.
 
-### 1. Put the credential in your environment
+### 1. Store the credential outside the repository
 
 ```bash
-export HF_API_CREDENTIALS="Key <id>:<secret>"
+umask 077
+mkdir -p ~/.omp
+printf 'Key <id>:<secret>\n' > ~/.omp/higgsfield.credentials
+chmod 600 ~/.omp/higgsfield.credentials
 ```
 
-Never commit this value. Every deployment path in this repository reads it from the
-environment; no image, config file, or tarball carries a credential.
+File mode `0600`, outside any repository. Every deployment path in this project reads the
+credential from the environment or from a file like this; no image, tarball, or committed
+config carries it.
 
-### 2. Confirm the gateway works before wiring it into a host
+### 2. Confirm the install before wiring it into a host
 
 ```bash
-npx -y higgsfield-mcp doctor
+export HF_API_CREDENTIALS="$(cat ~/.omp/higgsfield.credentials)"
+~/.local/share/higgsfield-mcp/node_modules/.bin/higgsfield-mcp doctor
 ```
 
 `doctor` prints one `ok`/`FAIL` line per check (Node version, transport, auth, readiness
-checks, allowed paths, asset mode, database, Redis, skills tree) and exits non-zero when any
-check fails. `npx -y higgsfield-mcp version` prints the gateway version, the MCP protocol
-revision, and the Node version.
+checks, allowed paths, asset mode, database, Redis, skills tree) and exits non-zero when a
+check fails. It never performs paid generation. `higgsfield-mcp version` prints the gateway
+version, the MCP protocol revision, and the Node version.
 
 ### 3. Add it to your MCP host
 
-Generic local stdio pattern (SPEC §72). Host-specific configuration may differ; the
-credential is referenced from the environment, never inlined:
+This is the configuration used for OMP / Pi (`~/.omp/agent/mcp.json`), with the install
+prefix from the previous section. `!cat` is the host's command indirection: the credential
+is read at launch, so no key material sits in the config file.
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
   "mcpServers": {
     "higgsfield": {
-      "command": "npx",
-      "args": ["-y", "higgsfield-mcp"],
+      "type": "stdio",
+      "command": "/Users/mike/.nvm/versions/node/v24.16.0/bin/node",
+      "args": [
+        "/Users/mike/.local/share/higgsfield-mcp/node_modules/higgsfield-mcp/dist/cli.js",
+        "serve",
+        "--transport",
+        "stdio"
+      ],
       "env": {
-        "HF_API_CREDENTIALS": "${HF_API_CREDENTIALS}"
-      }
+        "HF_API_CREDENTIALS": "!cat /Users/mike/.omp/higgsfield.credentials",
+        "HF_MCP_LOG_LEVEL": "info",
+        "HF_MCP_ALLOWED_PATHS": "/Users/mike/.local/share/higgsfield-mcp/inputs"
+      },
+      "timeout": 120000
     }
   }
 }
 ```
 
-If your host does not expand `${VAR}` inside `env`, set `HF_API_CREDENTIALS` in the
-environment the host is launched from (or in the host's secret store) and pass it through
-using that host's mechanism. Never paste the literal credential into a committed file.
+Adjust the three absolute paths for your machine (`command` = your `node` binary, `args[0]`
+= the installed `dist/cli.js`, `HF_MCP_ALLOWED_PATHS` = the directory local uploads may come
+from). Paths must be absolute. `timeout` is generous because a cold start loads a bundled
+runtime; `jobs.wait` itself is capped server-side at 25 s.
 
-The default command is `serve --transport stdio`; no arguments are required.
+Hosts that expand environment variables instead of running commands can use the generic
+pattern (SPEC §72), with the credential passed through the environment:
+
+```json
+{
+  "mcpServers": {
+    "higgsfield": {
+      "command": "higgsfield-mcp",
+      "env": { "HF_API_CREDENTIALS": "${HF_API_CREDENTIALS}" }
+    }
+  }
+}
+```
+
+Reload the host afterwards (`/mcp reload` in OMP, then `/mcp list` and
+`/mcp test higgsfield`). The server exposes 14 tools as `mcp__higgsfield__*`, plus five
+resources (`higgsfield://models`, `…/models/{id}`, `…/jobs/{id}`, `…/assets/{id}`,
+`…/capabilities`). The default command is `serve --transport stdio`; no arguments are
+required.
 
 ### 4. Generate
 
@@ -118,17 +189,23 @@ PostgreSQL is configured.
 
 ### 5. Generate from your own files (optional)
 
-Local file inputs are stdio-only and must sit under an allowed path:
+Local file inputs are stdio-only and must sit under an allowed path — the
+`HF_MCP_ALLOWED_PATHS` directory from the host config above:
 
 ```bash
-export HF_MCP_ALLOWED_PATHS="/Users/me/Pictures/inputs"
+mkdir -p ~/.local/share/higgsfield-mcp/inputs
+cp ~/Pictures/reference.png ~/.local/share/higgsfield-mcp/inputs/
 ```
 
-Then `higgsfield.media.upload` accepts `{"source": {"path": "/Users/me/Pictures/inputs/x.png"}}`
-and returns an `asset_id` usable as a `{"type": "asset", "asset_id": "..."}` reference. With
-no `HF_MCP_ALLOWED_PATHS`, local file inputs are denied; use a public HTTPS URL instead.
+Then `higgsfield.media.upload` accepts
+`{"source": {"path": "/Users/mike/.local/share/higgsfield-mcp/inputs/reference.png"}}` and
+returns an `asset_id` usable as `{"type": "asset", "asset_id": "..."}`. With no
+`HF_MCP_ALLOWED_PATHS`, local file inputs are denied; use a public HTTPS URL instead.
 
 ## CLI
+
+The installed shim is `~/.local/share/higgsfield-mcp/node_modules/.bin/higgsfield-mcp`
+(shown below as `higgsfield-mcp`).
 
 | Command | Purpose |
 |---|---|

@@ -76,7 +76,7 @@ accepts only catalog endpoint ids, so these paths are unreachable rather than me
 
 | Surface | Status |
 |---|---|
-| stdio MCP | Stable; the default command, and what `npx -y higgsfield-mcp` runs. |
+| stdio MCP | Stable; the default command, and what the installed `higgsfield-mcp` runs. |
 | Streamable HTTP MCP (`POST /mcp`) | Stable, with bearer authentication required. |
 | npm package (`higgsfield-mcp`, `bin.higgsfield-mcp`) | Built and packed by `pnpm --filter higgsfield-mcp pack`; verified self-contained by the distribution profile of the e2e harness. |
 | Container image | `Dockerfile` (multi-stage, `node:22-slim` pinned by digest, non-root uid/gid 10001, read-only root with a `/tmp` tmpfs, `STOPSIGNAL SIGTERM`, healthcheck on `/health`). |

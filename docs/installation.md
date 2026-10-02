@@ -9,32 +9,46 @@
 - Docker is only needed for the container and compose paths. PostgreSQL and Redis are only
   needed in remote (HTTP) mode.
 
-## Run without installing
+## Install from this repository
+
+The npm package is **not published to the registry**, so `npx -y higgsfield-mcp` and
+`npm install -g higgsfield-mcp` do not work. Install from
+`https://github.com/miketropi/higgsfield-api-mcp` instead — the README's
+[Install](../README.md#install) section has the copy-paste sequence. In short:
 
 ```bash
-export HF_API_CREDENTIALS="Key <id>:<secret>"
-npx -y higgsfield-mcp doctor
-npx -y higgsfield-mcp                # serve --transport stdio
+git clone https://github.com/miketropi/higgsfield-api-mcp ~/.local/share/higgsfield-mcp-src
+cd ~/.local/share/higgsfield-mcp-src
+corepack enable
+pnpm install --frozen-lockfile
+pnpm -r run build
+pnpm --filter higgsfield-mcp pack --pack-destination "$PWD/artifacts"
+
+mkdir -p ~/.local/share/higgsfield-mcp/inputs
+npm install --prefix ~/.local/share/higgsfield-mcp "$PWD/artifacts/higgsfield-mcp-0.1.0.tgz"
+~/.local/share/higgsfield-mcp/node_modules/.bin/higgsfield-mcp version
 ```
 
-`higgsfield-mcp` with no arguments is `serve --transport stdio`, which is what an MCP host
-config (`npx -y higgsfield-mcp`) launches. See the [README](../README.md) for a host config
-snippet.
-
-## Global install
+Install from a tagged release's tarball once one exists:
 
 ```bash
-npm install -g higgsfield-mcp
-higgsfield-mcp version
+npm install --prefix ~/.local/share/higgsfield-mcp \
+  https://github.com/miketropi/higgsfield-api-mcp/releases/download/v0.1.0/higgsfield-mcp-0.1.0.tgz
 ```
 
-## Build from source
+`higgsfield-mcp` with no arguments is `serve --transport stdio`, which is what the host
+configuration in the [README](../README.md#3-add-it-to-your-mcp-host) launches.
+
+## Build from source (no install)
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build                     # pnpm -r run build
 node apps/server/dist/cli.js doctor
 ```
+
+A host can also point straight at the checkout:
+`node <checkout>/apps/server/dist/cli.js serve --transport stdio`.
 
 The workspace requires the `pnpm` version in the root `packageManager` field. Installing
 without `--frozen-lockfile` is not supported for release builds.
