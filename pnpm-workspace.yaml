@@ -1,0 +1,13 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Dependency install scripts are gated explicitly: only these may run them.
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@types/node@26.6.4'
+  - '@aws-sdk/client-s3@3.1145.0'
+  - '@aws-sdk/s3-request-presigner@3.1145.0'

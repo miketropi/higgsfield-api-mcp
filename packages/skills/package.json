@@ -1,0 +1,31 @@
+{
+  "name": "@higgsfield-mcp/skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json",
+    "skills:sync": "tsx src/cli.ts sync",
+    "skills:validate": "tsx src/cli.ts validate",
+    "skills:check-upstream": "tsx src/cli.ts check-upstream"
+  },
+  "dependencies": {
+    "@higgsfield-mcp/core": "workspace:*",
+    "zod": "4.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "tsup": "8.5.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,233 @@
+name: CI
+
+# Pull-request gate. Deterministic and unprivileged: no repository secrets are
+# used, no provider credentials are present, and no test path performs a paid
+# generation (the live provider profile is opt-in through HF_MCP_LIVE_E2E and is
+# never enabled here).
+#
+# The integration job starts the repository's own compose stack and points
+# `tests/integration/reliability/*` at it. Those suites skip - and would pass
+# green - when HF_MCP_TEST_DATABASE_URL / HF_MCP_TEST_REDIS_URL are unset, so the
+# job asserts the variables are non-empty and fails if the skip path is taken.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: '1'
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  checks:
+    name: install, typecheck, tests, skills
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Reads `packageManager` from package.json (pnpm@11.13.0) - must run before
+      # setup-node so the pnpm store path exists for caching.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Contract tests
+        run: pnpm test:contract
+
+      - name: Skills validation
+        run: pnpm skills:validate
+
+  integration:
+    name: integration tests (PostgreSQL + Redis)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      # Loopback-only throwaway values for the stack this job starts. They are not
+      # credentials for anything: the services live for the duration of the job and
+      # publish on the runner's loopback interface.
+      CI_POSTGRES_USER: higgsfield
+      CI_POSTGRES_PASSWORD: ci-only-postgres-password
+      CI_POSTGRES_DB: higgsfield_mcp
+      CI_REDIS_PASSWORD: ci-only-redis-password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Start PostgreSQL and Redis
+        run: |
+          set -euo pipefail
+          # docker-compose.yml deliberately publishes no infrastructure ports (a
+          # fixed 5432/6379 collides with services installed on a developer
+          # machine). This job-local override maps them on loopback, where a
+          # GitHub-hosted runner has both ports free.
+          cat > "${RUNNER_TEMP}/compose.ci.yml" <<'YAML'
+          services:
+            postgres:
+              ports:
+                - "127.0.0.1:5432:5432"
+            redis:
+              ports:
+                - "127.0.0.1:6379:6379"
+          YAML
+          # docker-compose.yml interpolates every secret from the git-ignored
+          # `.env`, including the keys owned by the objectstore/gateway services
+          # this job does not start. The values below are job-local and disposable.
+          cat > .env <<EOF
+          POSTGRES_USER=${CI_POSTGRES_USER}
+          POSTGRES_PASSWORD=${CI_POSTGRES_PASSWORD}
+          POSTGRES_DB=${CI_POSTGRES_DB}
+          REDIS_PASSWORD=${CI_REDIS_PASSWORD}
+          HF_MCP_DATA_ENCRYPTION_KEY=$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))")
+          HF_MCP_METRICS_TOKEN=ci-only-metrics-token
+          HF_MCP_DEV_TOKEN=ci-only-dev-token
+          HF_MCP_PROVIDER_ACCOUNT_ID=ci-only-provider-account
+          HF_API_CREDENTIALS=Key ci-only-id:ci-only-secret
+          HF_MCP_S3_ACCESS_KEY_ID=ci-only-s3-access-key
+          HF_MCP_S3_SECRET_ACCESS_KEY=ci-only-s3-secret-key
+          EOF
+          COMPOSE="docker compose -f docker-compose.yml -f ${RUNNER_TEMP}/compose.ci.yml"
+          ${COMPOSE} up -d --wait postgres redis
+          ${COMPOSE} ps
+
+      - name: Integration tests
+        run: |
+          set -euo pipefail
+          export HF_MCP_TEST_DATABASE_URL="postgres://${CI_POSTGRES_USER}:${CI_POSTGRES_PASSWORD}@127.0.0.1:5432/${CI_POSTGRES_DB}"
+          export HF_MCP_TEST_REDIS_URL="redis://:${CI_REDIS_PASSWORD}@127.0.0.1:6379"
+          # Unset URLs make the reliability suites skip and report success.
+          test -n "${HF_MCP_TEST_DATABASE_URL}"
+          test -n "${HF_MCP_TEST_REDIS_URL}"
+          set +e
+          pnpm test:integration 2>&1 | tee "${RUNNER_TEMP}/integration.log"
+          status="${PIPESTATUS[0]}"
+          set -e
+          # `[reliability] <VAR> is not set - skipping <suite>.`
+          if grep -q '\[reliability\].*is not set' "${RUNNER_TEMP}/integration.log"; then
+            echo "::error::reliability suites skipped: PostgreSQL/Redis were not reachable from this job" >&2
+            exit 1
+          fi
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
+
+      - name: Tear down PostgreSQL and Redis
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f .env ] || [ ! -f "${RUNNER_TEMP}/compose.ci.yml" ]; then
+            echo "the compose stack was never started; nothing to tear down"
+            exit 0
+          fi
+          docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose.ci.yml" down -v --remove-orphans
+          left="$(docker volume ls --filter name=higgsfield-mcp -q)"
+          if [ -n "${left}" ]; then
+            echo "removing leftover volumes: ${left}"
+            docker volume rm -f ${left}
+          fi
+          rm -f .env
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Fails the pull request on high/critical advisories. Registry outages do
+      # not fail the build (`--ignore-registry-errors`).
+      - name: Audit
+        run: pnpm audit --audit-level=high --ignore-registry-errors
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build only - nothing is pushed from a pull request.
+      - name: Build the gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: higgsfield-mcp:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the image contract
+        run: |
+          set -euo pipefail
+          # Runtime user is the explicit non-root uid/gid from the Dockerfile.
+          test "$(docker run --rm --entrypoint id higgsfield-mcp:ci -u)" = "10001"
+          # The CLI runs with a read-only root filesystem and a tmpfs /tmp.
+          docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            higgsfield-mcp:ci node apps/server/dist/cli.js version
+          # `migrate` needs the packaged .sql files next to the bundle.
+          docker run --rm --entrypoint sh higgsfield-mcp:ci -c 'test -n "$(ls apps/server/dist/migrations/*.sql)"'
+          # Skills listing must not require HF_MCP_SKILLS_DIR to be set.
+          docker run --rm higgsfield-mcp:ci node apps/server/dist/cli.js skills list

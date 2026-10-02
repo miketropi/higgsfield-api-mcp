@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2024"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "useUnknownInCatchVariables": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "paths": {
+      "@higgsfield-mcp/core": ["./packages/core/src/index.ts"],
+      "@higgsfield-mcp/core/*": ["./packages/core/src/*"],
+      "@higgsfield-mcp/provider-higgsfield": ["./packages/provider-higgsfield/src/index.ts"],
+      "@higgsfield-mcp/provider-higgsfield/*": ["./packages/provider-higgsfield/src/*"],
+      "@higgsfield-mcp/mcp": ["./packages/mcp/src/index.ts"],
+      "@higgsfield-mcp/mcp/*": ["./packages/mcp/src/*"],
+      "@higgsfield-mcp/config": ["./packages/config/src/index.ts"],
+      "@higgsfield-mcp/config/*": ["./packages/config/src/*"],
+      "@higgsfield-mcp/observability": ["./packages/observability/src/index.ts"],
+      "@higgsfield-mcp/observability/*": ["./packages/observability/src/*"],
+      "@higgsfield-mcp/skills": ["./packages/skills/src/index.ts"],
+      "@higgsfield-mcp/skills/*": ["./packages/skills/src/*"],
+      "@higgsfield-mcp/server/*": ["./apps/server/src/*"]
+    }
+  }
+}

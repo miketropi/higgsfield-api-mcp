@@ -1,0 +1,199 @@
+name: Release
+
+# Builds the release artifacts (npm tarball, container image, SBOM) for a version
+# tag, and publishes only from a context that requires an explicit human act:
+#   * a `v*` tag push, or
+#   * a manual workflow run.
+# Publishing additionally passes through the `release` environment, which is the
+# place to require a reviewer approval in the repository settings. Nothing here
+# runs on a pull request, and no step merges, tags or releases automatically.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: '1'
+  NODE_OPTIONS: --max-old-space-size=4096
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: build artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/server/package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match apps/server/package.json version ${version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "resolved version ${version} for ref ${GITHUB_REF_NAME:-<none>}"
+
+      - name: Build
+        run: pnpm -r run build
+
+      - name: Pack the npm artifact
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          pnpm --filter higgsfield-mcp pack --pack-destination artifacts
+          ls -l artifacts
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Built and loaded, never pushed here: pushing belongs to the gated job.
+      - name: Build the container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export the image as an OCI archive
+        run: docker save "${{ env.IMAGE }}:${{ steps.version.outputs.version }}" -o "artifacts/higgsfield-mcp-${{ steps.version.outputs.version }}.tar"
+
+      - name: Generate an SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: artifacts/higgsfield-mcp-${{ steps.version.outputs.version }}.tgz
+          format: spdx-json
+          output-file: artifacts/sbom.spdx.json
+          artifact-name: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            artifacts/*.tgz
+            artifacts/*.tar
+            artifacts/sbom.spdx.json
+
+  publish:
+    name: publish (approved)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Manual approval gate: configure required reviewers on this environment.
+    environment: release
+    permissions:
+      contents: write # create the GitHub release
+      packages: write # push to GHCR
+      id-token: write # npm provenance / OIDC
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Writes the npm auth entry that NODE_AUTH_TOKEN resolves against.
+          registry-url: https://registry.npmjs.org
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: artifacts
+
+      - name: Preflight publish credentials
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "NPM_TOKEN is not configured for this repository; nothing was published." >&2
+            echo "Add the secret (or switch to npm trusted publishing) and re-run the release for this tag." >&2
+            exit 1
+          fi
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `higgsfield-mcp` is unscoped, so no --access flag is needed; provenance
+          # is attested through the OIDC token granted to this job.
+          npm publish "artifacts/higgsfield-mcp-${{ needs.build.outputs.version }}.tgz" --provenance
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Push the container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.build.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            "artifacts/higgsfield-mcp-${{ needs.build.outputs.version }}.tgz" \
+            "artifacts/higgsfield-mcp-${{ needs.build.outputs.version }}.tar" \
+            "artifacts/sbom.spdx.json" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag

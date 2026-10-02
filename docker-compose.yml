@@ -1,0 +1,312 @@
+# Local integration stack for the Higgsfield MCP gateway.
+#
+#   cp .env.example .env      # replace the placeholders
+#   docker compose up -d      # builds the gateway image, then starts in dependency
+#                             # order: Postgres/Redis/object store healthy ->
+#                             # one-shot init jobs -> gateway
+#   docker compose ps         # the gateway reports its image HEALTHCHECK state
+#   curl -s http://127.0.0.1:3000/health
+#   curl -s -H "Authorization: Bearer $HF_MCP_METRICS_TOKEN" http://127.0.0.1:3000/metrics
+#   docker compose down -v     # stops everything and drops the data volumes
+#
+#   `--wait` only understands long-running services: this stack has two one-shot
+#   jobs (migrate-init, tenants-init) that exit 0, which compose reports as
+#   "exited (0)" and converts into a non-zero exit code. For infrastructure-only
+#   runs it is safe and useful:
+#       docker compose up -d --wait postgres redis objectstore
+#
+# Properties this file guarantees:
+#   * Secrets and environment-specific values come from the git-ignored `.env`
+#     only; nothing in this file is a credential (`:?` fails fast with a message
+#     when a required value is missing). See .env.example for the full list.
+#   * Loopback-safe by default: every published port is bound to 127.0.0.1, the
+#     host-header allowlist is `127.0.0.1,localhost`, and no wildcard origin is
+#     allowed (the config layer rejects `*` in allowed hosts/origins outright).
+#   * The gateway starts only after Postgres, Redis and the object store report
+#     healthy and both init jobs have exited 0 - schema migrations always run
+#     before the first request (the gateway never runs DDL implicitly).
+#
+# READ-ONLY ROOT REQUIREMENT
+#   The image is built for a read-only root filesystem and must be run with a
+#   writable /tmp:
+#       docker run --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m ...
+#   `docker compose` cannot express `--read-only`, so the gateway service below
+#   declares the equivalent settings (`read_only: true` + `tmpfs`). The gateway
+#   writes nothing outside /tmp and the object store - uploads and downloads
+#   stream in memory and packages/core has no temporary-file usage - so /tmp is a
+#   safety net rather than a working directory. Postgres/Redis keep their own
+#   write paths in their own named volumes.
+#
+# SIGTERM
+#   The gateway drains in-flight MCP requests for HF_MCP_SHUTDOWN_GRACE_MS
+#   (default 10s) after SIGTERM; `stop_grace_period` below leaves extra headroom
+#   before the runtime escalates to SIGKILL.
+#
+# HOST PORTS
+#   The gateway publishes a known loopback port (127.0.0.1:3000 by default,
+#   HF_MCP_GATEWAY_PORT). The infrastructure services publish nothing: a fixed
+#   5432/6379/8333 collides with any locally installed PostgreSQL, Redis or MinIO
+#   and `up` then fails with
+#       ports are not available: ... listen tcp4 127.0.0.1:6379: bind: address already in use
+#   (observed on this workstation, where a native redis-server owns 6379).
+#   Containers reach each other by service name on the internal ports
+#   (postgres:5432, redis:6379, objectstore:8333) - the only wiring the gateway
+#   needs - and a human can reach a service with
+#       docker compose exec postgres psql -U <POSTGRES_USER> -d <POSTGRES_DB>
+#       docker compose exec redis redis-cli -a <REDIS_PASSWORD>
+#   To publish one anyway, uncomment the `ports:` block on that service (each one
+#   carries a ready-to-use line) and pick a port that is actually free.
+#
+# OBJECT STORE (deliberate substitution - also documented in docs/deployment.md)
+#   Upstream MinIO community images are no longer published anywhere:
+#     * docker.io/minio/minio and docker.io/minio/mc -> not in the registry
+#       (Docker Hub API returns HTTP 404; anonymous pull tokens are issued with
+#       empty access and `docker pull minio/minio:latest` is denied)
+#     * quay.io/minio/minio -> anonymous pull denied (minio's public quay repos
+#       are only CSI/operator tooling)
+#     * dl.min.io/server/minio/release/... -> HTTP 410 Gone (source-only
+#       distribution since the community repo was archived)
+#   This stack therefore runs SeaweedFS, an actively maintained Apache-2.0 S3
+#   implementation, in the "minio" role: one all-in-one process (`weed mini`)
+#   with the S3 API on :8333. Credentials from .env are enforced as a SeaweedFS
+#   admin identity via AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (verified: a
+#   request signed with the wrong key is rejected with 403 and a presigned GET
+#   round-trips), and `-bucket` creates the bucket on startup - that is the
+#   bucket-init step.
+#   To use MinIO instead, when you have an image available: keep the service name
+#   and the :8333 S3 port, replace `image`/`command` with `minio/minio:... server
+#   /data --console-address :9001`, map MINIO_ROOT_USER/MINIO_ROOT_PASSWORD to
+#   the same HF_MCP_S3_* values, and add the `mc mb` bucket-init step.
+
+name: higgsfield-mcp
+
+x-gateway-build: &gateway-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-higgsfield}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example to .env first)}
+      POSTGRES_DB: ${POSTGRES_DB:-higgsfield_mcp}
+    # No host port is published by default: infra services are reachable from the
+    # other containers by service name (postgres:5432) and from the host through
+    # `docker compose exec postgres psql -U <user>`. Uncomment to publish one on
+    # loopback (choose a port that is actually free - a fixed 5432 collides with
+    # any locally installed PostgreSQL):
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    environment:
+      # Redis has no environment-based password setting, so the command below
+      # expands the container's own variable at run time: the password never
+      # appears as a literal argument in this file or in `docker compose config`.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env (copy .env.example to .env first)}
+    command:
+      - /bin/sh
+      - -c
+      - exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes
+    # Uncomment to publish Redis on loopback (see the postgres note above):
+    # ports:
+    #   - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  # S3-compatible object store (= the "minio" role; see the header note).
+  objectstore:
+    image: chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+    restart: unless-stopped
+    # `mini` runs master + volume + filer + S3 in one process; `-bucket` is the
+    # bucket-init step (created on startup when it does not exist yet).
+    command: ["mini", "-dir=/data", "-bucket=${HF_MCP_S3_BUCKET:-higgsfield-assets}"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${HF_MCP_S3_ACCESS_KEY_ID:?set HF_MCP_S3_ACCESS_KEY_ID in .env}
+      AWS_SECRET_ACCESS_KEY: ${HF_MCP_S3_SECRET_ACCESS_KEY:?set HF_MCP_S3_SECRET_ACCESS_KEY in .env}
+    # Uncomment to publish the S3 API on loopback. Note that presigned URLs are
+    # generated with HF_MCP_S3_ENDPOINT (http://objectstore:8333 inside the compose
+    # network), so a host-side client needs that endpoint rewritten too.
+    # ports:
+    #   - "127.0.0.1:8333:8333"
+    volumes:
+      - objectstore-data:/data
+    healthcheck:
+      # Reachability only: an unauthenticated request may be answered with 403,
+      # which still proves the S3 listener is up (curl exits non-zero only when
+      # the connection itself fails).
+      test: ["CMD-SHELL", "curl -s -o /dev/null --max-time 5 http://127.0.0.1:8333/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # One-shot: schema migrations must be applied before the gateway serves (the
+  # PostgreSQL adapter never runs DDL implicitly). Runs the same image as the
+  # gateway, in local/stdio config mode, where HF_MCP_DATABASE_URL is the only
+  # required setting.
+  migrate-init:
+    build: *gateway-build
+    image: higgsfield-mcp:local
+    restart: "no"
+    entrypoint: ["node", "apps/server/dist/cli.js", "migrate"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HF_MCP_DATABASE_URL: postgres://${POSTGRES_USER:-higgsfield}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-higgsfield_mcp}
+      HF_MCP_LOG_LEVEL: ${HF_MCP_LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-shot: derives the tenants file from .env (the file stores a SHA-256 digest
+  # of the bearer token, never the token) and hands it to the gateway through a
+  # named volume. Schema: packages/config/src/files.ts (tenantShapeSchema) -
+  # expiresAt is ISO-8601, audience must be https and must equal
+  # HF_MCP_PUBLIC_URL, providerCredentialsEnv names an environment variable, and
+  # exactly one of tokenSha256/oauthSubject must be present.
+  tenants-init:
+    image: node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
+    restart: "no"
+    entrypoint: ["node", "-e"]
+    command:
+      - |
+        const { createHash } = require('node:crypto');
+        const { mkdirSync, writeFileSync } = require('node:fs');
+        const token = process.env.HF_MCP_DEV_TOKEN;
+        const publicUrl = process.env.HF_MCP_PUBLIC_URL;
+        const accountId = process.env.HF_MCP_PROVIDER_ACCOUNT_ID;
+        if (!token || !publicUrl || !accountId) {
+          console.error('tenants-init: HF_MCP_DEV_TOKEN, HF_MCP_PUBLIC_URL and HF_MCP_PROVIDER_ACCOUNT_ID are required');
+          process.exit(1);
+        }
+        const record = {
+          tenantId: process.env.HF_MCP_DEV_TENANT_ID,
+          tokenId: process.env.HF_MCP_DEV_TOKEN_ID,
+          tokenSha256: createHash('sha256').update(token).digest('hex'),
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          audience: publicUrl,
+          scopes: ['higgsfield:read', 'higgsfield:generate', 'higgsfield:upload'],
+          providerCredentialsEnv: 'HF_API_CREDENTIALS',
+          providerAccountId: accountId
+        };
+        mkdirSync('/tenants', { recursive: true });
+        writeFileSync('/tenants/tenants.json', JSON.stringify({ tenants: [record] }, null, 2) + '\n', { mode: 0o644 });
+        console.log('tenants-init: wrote /tenants/tenants.json for tenant ' + record.tenantId);
+    environment:
+      HF_MCP_DEV_TOKEN: ${HF_MCP_DEV_TOKEN:?set HF_MCP_DEV_TOKEN in .env}
+      HF_MCP_DEV_TENANT_ID: ${HF_MCP_DEV_TENANT_ID:-dev}
+      HF_MCP_DEV_TOKEN_ID: ${HF_MCP_DEV_TOKEN_ID:-dev-token-1}
+      HF_MCP_PUBLIC_URL: ${HF_MCP_PUBLIC_URL:-https://localhost:3000}
+      HF_MCP_PROVIDER_ACCOUNT_ID: ${HF_MCP_PROVIDER_ACCOUNT_ID:?set HF_MCP_PROVIDER_ACCOUNT_ID in .env}
+    volumes:
+      - tenants-data:/tenants
+
+  gateway:
+    build: *gateway-build
+    image: higgsfield-mcp:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      objectstore:
+        condition: service_healthy
+      migrate-init:
+        condition: service_completed_successfully
+      tenants-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${HF_MCP_GATEWAY_PORT:-3000}:3000"
+    # Read-only root filesystem (see the header note); /tmp is the only writable
+    # path the gateway is allowed to have.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    volumes:
+      - tenants-data:/etc/higgsfield:ro
+    environment:
+      # Transport/HTTP surface
+      HF_MCP_TRANSPORT: http
+      HF_MCP_HOST: "0.0.0.0"
+      HF_MCP_PORT: "3000"
+      HF_MCP_PUBLIC_URL: ${HF_MCP_PUBLIC_URL:-https://localhost:3000}
+      HF_MCP_ALLOWED_HOSTS: ${HF_MCP_ALLOWED_HOSTS:-127.0.0.1,localhost}
+      HF_MCP_ALLOWED_ORIGINS: ${HF_MCP_ALLOWED_ORIGINS:-}
+      HF_MCP_SHUTDOWN_GRACE_MS: ${HF_MCP_SHUTDOWN_GRACE_MS:-10000}
+
+      # Persistence (remote mode requires both URLs plus the encryption key)
+      HF_MCP_DATABASE_URL: postgres://${POSTGRES_USER:-higgsfield}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-higgsfield_mcp}
+      HF_MCP_REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379
+      HF_MCP_DATA_ENCRYPTION_KEY: ${HF_MCP_DATA_ENCRYPTION_KEY:?set HF_MCP_DATA_ENCRYPTION_KEY in .env}
+
+      # Auth (remote mode refuses `none`; the tenants file is required with
+      # static_token/oauth_jwt) and the operator metrics token
+      HF_MCP_AUTH_MODE: ${HF_MCP_AUTH_MODE:-static_token}
+      HF_MCP_TENANTS_FILE: /etc/higgsfield/tenants.json
+      HF_MCP_METRICS_TOKEN: ${HF_MCP_METRICS_TOKEN:?set HF_MCP_METRICS_TOKEN in .env}
+
+      # Assets: managed mode requires bucket + access key + secret + encryption key
+      HF_MCP_ASSET_MODE: ${HF_MCP_ASSET_MODE:-managed}
+      HF_MCP_S3_ENDPOINT: ${HF_MCP_S3_ENDPOINT:-http://objectstore:8333}
+      HF_MCP_S3_REGION: ${HF_MCP_S3_REGION:-us-east-1}
+      HF_MCP_S3_BUCKET: ${HF_MCP_S3_BUCKET:-higgsfield-assets}
+      HF_MCP_S3_ACCESS_KEY_ID: ${HF_MCP_S3_ACCESS_KEY_ID:?set HF_MCP_S3_ACCESS_KEY_ID in .env}
+      HF_MCP_S3_SECRET_ACCESS_KEY: ${HF_MCP_S3_SECRET_ACCESS_KEY:?set HF_MCP_S3_SECRET_ACCESS_KEY in .env}
+      HF_MCP_S3_FORCE_PATH_STYLE: ${HF_MCP_S3_FORCE_PATH_STYLE:-true}
+      HF_MCP_S3_PREFIX: ${HF_MCP_S3_PREFIX:-higgsfield}
+
+      # Provider binding and credentials
+      HF_MCP_PROVIDER_ACCOUNT_ID: ${HF_MCP_PROVIDER_ACCOUNT_ID:?set HF_MCP_PROVIDER_ACCOUNT_ID in .env}
+      HF_MCP_PROVIDER_BASE_URL: ${HF_MCP_PROVIDER_BASE_URL:-https://api.higgsfield.ai}
+      HF_API_CREDENTIALS: ${HF_API_CREDENTIALS:?set HF_API_CREDENTIALS in .env}
+
+      # Optional tuning; an empty value means "unset" to the config loader
+      HF_MCP_LOG_LEVEL: ${HF_MCP_LOG_LEVEL:-info}
+      HF_MCP_LOG_PRETTY: ${HF_MCP_LOG_PRETTY:-false}
+      HF_MCP_METRICS_ENABLED: ${HF_MCP_METRICS_ENABLED:-true}
+      HF_MCP_WORKERS_ENABLED: ${HF_MCP_WORKERS_ENABLED:-true}
+      HF_MCP_MAX_IMAGE_JOBS: ${HF_MCP_MAX_IMAGE_JOBS:-10}
+      HF_MCP_MAX_VIDEO_JOBS: ${HF_MCP_MAX_VIDEO_JOBS:-3}
+      HF_MCP_SIGNED_URL_TTL_SECONDS: ${HF_MCP_SIGNED_URL_TTL_SECONDS:-900}
+      HF_MCP_MAX_JOB_COST_USD: ${HF_MCP_MAX_JOB_COST_USD:-}
+      HF_MCP_DAILY_COST_LIMIT_USD: ${HF_MCP_DAILY_COST_LIMIT_USD:-}
+      HF_MCP_REQUIRE_CONFIRM_ABOVE_USD: ${HF_MCP_REQUIRE_CONFIRM_ABOVE_USD:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+volumes:
+  postgres-data:
+  redis-data:
+  objectstore-data:
+  tenants-data:

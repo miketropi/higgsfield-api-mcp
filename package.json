@@ -1,0 +1,35 @@
+{
+  "name": "higgsfield-mcp-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck && tsc -p tsconfig.tests.json",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "tsx scripts/e2e/cli.ts",
+    "test": "vitest run",
+    "skills:sync": "pnpm --filter @higgsfield-mcp/skills run skills:sync",
+    "skills:validate": "pnpm --filter @higgsfield-mcp/skills run skills:validate",
+    "skills:check-upstream": "pnpm --filter @higgsfield-mcp/skills run skills:check-upstream",
+    "migrate": "pnpm --filter higgsfield-mcp run migrate"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "@modelcontextprotocol/server": "2.2.0",
+    "@opentelemetry/api": "1.9.1",
+    "@types/node": "26.6.4",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1",
+    "tsup": "8.5.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
+  }
+}

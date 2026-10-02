@@ -1,0 +1,16 @@
+export { SkillsError } from './errors.js';
+export { loadManifest } from './manifest.js';
+export type { SkillManifest, SkillManifestEntry } from './manifest.js';
+export { validateSkills } from './validate.js';
+export type { ValidateOptions, ValidateResult } from './validate.js';
+export { syncSkills } from './sync.js';
+export type { SyncOptions, SyncResult } from './sync.js';
+export { checkUpstream } from './check-upstream.js';
+export type { CheckUpstreamOptions, CheckUpstreamResult } from './check-upstream.js';
+export { createHttpTransport, extractTarGz } from './transport.js';
+export type { UpstreamTransport, HttpTransportOptions } from './transport.js';
+export { KNOWN_TOOLS, TOOL_ROLE, isKnownTool } from './tools.js';
+export { evaluateSkillDocument, extractToolCalls, parseTrace } from './trace.js';
+export type { SkillDocumentChecks, SkillTrace, TraceStep, TraceRouting } from './trace.js';
+export { loadRuleSet, loadFragments, buildSkillFiles, rewriteFrontmatter, findSection, assertNoForbidden } from './patch.js';
+export type { PatchRule, PatchRuleSet, PatchDocument } from './patch.js';

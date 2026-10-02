@@ -1,0 +1,392 @@
+{
+  "catalogVersion": "2026-10-02.1",
+  "asOf": "2026-10-02",
+  "uploadContentTypes": [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "audio/wav",
+    "audio/x-wav",
+    "video/mp4"
+  ],
+  "uploadUrlTtlSeconds": 3600,
+  "generatedFrom": [
+    "https://docs.higgsfield.ai/docs/models.md",
+    "https://docs.higgsfield.ai/docs/models/grok-image-2/generate-and-edit.md",
+    "https://docs.higgsfield.ai/docs/models/qwen-image-3/edit.md",
+    "https://docs.higgsfield.ai/docs/models/kling-2-5-turbo/pro-text-to-video.md",
+    "https://docs.higgsfield.ai/docs/models/kling-2-5-turbo/pro-image-to-video.md",
+    "https://docs.higgsfield.ai/docs/models/seedance-2-5/image-to-video.md",
+    "https://docs.higgsfield.ai/docs/models/seedance-2-5/reference-to-video.md",
+    "https://docs.higgsfield.ai/docs/models/soul-id/create-character.md"
+  ],
+  "models": [
+    {
+      "id": "xai/grok-imagine-image-2.0",
+      "name": "Grok Imagine 2.0",
+      "provider": "higgsfield",
+      "type": "image",
+      "endpoint": "xai/grok-imagine-image-2.0",
+      "kind": "generation",
+      "concurrencyClass": "image",
+      "capabilities": ["image_generation", "image_edit", "reference_images"],
+      "status": "active",
+      "limits": {
+        "maxCount": 1,
+        "maxReferenceImages": 10,
+        "resolutions": ["1k", "2k"],
+        "aspectRatios": ["auto", "1:1", "1:2", "2:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"]
+      },
+      "inputSchema": {
+        "type": "object",
+        "title": "Grok Imagine 2.0 Playground",
+        "required": ["prompt"],
+        "properties": {
+          "prompt": { "type": "string", "title": "Prompt", "description": "Write your prompt here" },
+          "quality": { "enum": ["low", "medium"], "type": "string", "title": "Quality", "default": "medium" },
+          "image_urls": {
+            "type": "array",
+            "items": { "type": "string", "title": "Image", "format": "uri" },
+            "title": "Input Images",
+            "maxItems": 10,
+            "minItems": 0
+          },
+          "resolution": { "enum": ["1k", "2k"], "type": "string", "title": "Resolution", "default": "1k" },
+          "aspect_ratio": {
+            "enum": ["auto", "1:1", "1:2", "2:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+            "type": "string",
+            "default": "auto"
+          }
+        }
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/grok-image-2/generate-and-edit.md",
+        "asOf": "2026-10-02"
+      }
+    },
+    {
+      "id": "alibaba/qwen-image-3/edit",
+      "name": "Qwen Image 3 Edit",
+      "provider": "higgsfield",
+      "type": "image",
+      "endpoint": "alibaba/qwen-image-3/edit",
+      "kind": "generation",
+      "concurrencyClass": "image",
+      "capabilities": ["image_edit", "reference_images"],
+      "status": "active",
+      "limits": {
+        "maxCount": 1,
+        "maxReferenceImages": 3,
+        "resolutions": ["1k", "2k"],
+        "aspectRatios": ["1:1", "2:3", "3:2", "3:4", "4:3", "7:9", "9:7", "9:16", "16:9", "21:9"]
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": ["prompt", "image_urls"],
+        "additionalProperties": false,
+        "properties": {
+          "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+          "prompt": { "type": "string", "minLength": 1 },
+          "image_urls": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "minItems": 1,
+            "maxItems": 3
+          },
+          "resolution": { "enum": ["1k", "2k"], "type": "string", "default": "1k" },
+          "aspect_ratio": {
+            "enum": ["1:1", "2:3", "3:2", "3:4", "4:3", "7:9", "9:7", "9:16", "16:9", "21:9"],
+            "type": "string",
+            "default": "1:1"
+          },
+          "prompt_extend": { "type": "boolean", "default": true },
+          "enable_thinking": { "type": "boolean", "default": true },
+          "negative_prompt": { "type": "string" },
+          "prompt_extend_mode": { "enum": ["direct"], "type": "string", "default": "direct" }
+        },
+        "if": { "required": ["enable_thinking"], "properties": { "enable_thinking": { "const": true } } },
+        "then": { "required": ["prompt_extend"], "properties": { "prompt_extend": { "const": true } } }
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/qwen-image-3/edit.md",
+        "asOf": "2026-10-02"
+      }
+    },
+    {
+      "id": "kling-video/v2.5-turbo/pro/text-to-video",
+      "name": "Kling 2.5 Turbo Pro Text to Video",
+      "provider": "higgsfield",
+      "type": "video",
+      "endpoint": "kling-video/v2.5-turbo/pro/text-to-video",
+      "kind": "generation",
+      "concurrencyClass": "video",
+      "capabilities": ["text_to_video"],
+      "status": "active",
+      "limits": {
+        "durationsSeconds": [5, 10]
+      },
+      "inputSchema": {
+        "type": "object",
+        "title": "Kling 2.5 Playground",
+        "required": ["prompt"],
+        "properties": {
+          "prompt": { "type": "string", "title": "Prompt", "description": "Write your prompt here" },
+          "duration": { "enum": [5, 10], "type": "integer", "title": "Duration", "default": 5 },
+          "cfg_scale": {
+            "type": "number",
+            "title": "CFG Scale",
+            "default": 0.5,
+            "maximum": 1,
+            "minimum": 0,
+            "multipleOf": 0.01
+          },
+          "negative_prompt": { "type": "string", "title": "Negative Prompt", "default": "" }
+        }
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/kling-2-5-turbo/pro-text-to-video.md",
+        "asOf": "2026-10-02"
+      }
+    },
+    {
+      "id": "kling-video/v2.5-turbo/pro/image-to-video",
+      "name": "Kling 2.5 Turbo Pro Image to Video",
+      "provider": "higgsfield",
+      "type": "video",
+      "endpoint": "kling-video/v2.5-turbo/pro/image-to-video",
+      "kind": "generation",
+      "concurrencyClass": "video",
+      "capabilities": ["image_to_video"],
+      "status": "active",
+      "limits": {
+        "durationsSeconds": [5, 10],
+        "maxReferenceImages": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "title": "Kling 2.5 Playground",
+        "required": ["prompt", "image_url"],
+        "properties": {
+          "prompt": { "type": "string", "title": "Prompt", "description": "Write your prompt here" },
+          "duration": { "enum": [5, 10], "type": "integer", "title": "Duration", "default": 5 },
+          "cfg_scale": {
+            "type": "number",
+            "title": "CFG Scale",
+            "default": 0.5,
+            "maximum": 1,
+            "minimum": 0,
+            "multipleOf": 0.01
+          },
+          "image_url": { "type": "string", "title": "Image URL", "format": "uri" },
+          "negative_prompt": { "type": "string", "title": "Negative Prompt", "default": "" }
+        }
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/kling-2-5-turbo/pro-image-to-video.md",
+        "asOf": "2026-10-02"
+      }
+    },
+    {
+      "id": "bytedance/seedance-2.5/image-to-video",
+      "name": "Seedance 2.5 Image to Video",
+      "provider": "higgsfield",
+      "type": "video",
+      "endpoint": "bytedance/seedance-2.5/image-to-video",
+      "kind": "generation",
+      "concurrencyClass": "video",
+      "capabilities": ["image_to_video", "end_image", "audio_generation"],
+      "status": "active",
+      "limits": {
+        "resolutions": ["480p", "720p", "1080p"],
+        "maxReferenceImages": 2
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": ["image_url"],
+        "additionalProperties": false,
+        "properties": {
+          "prompt": { "type": "string", "minLength": 1, "description": "Write your prompt here" },
+          "duration": { "type": "integer", "default": 5, "maximum": 30, "minimum": 4 },
+          "image_url": { "type": "string", "format": "uri" },
+          "resolution": { "enum": ["480p", "720p", "1080p"], "type": "string", "default": "720p" },
+          "bitrate_mode": { "enum": ["standard", "high"], "type": "string", "default": "high" },
+          "end_image_url": { "type": "string", "format": "uri" },
+          "generate_audio": { "type": "boolean", "default": true }
+        }
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/seedance-2-5/image-to-video.md",
+        "asOf": "2026-10-02"
+      }
+    },
+    {
+      "id": "bytedance/seedance-2.5/reference-to-video",
+      "name": "Seedance 2.5 Reference to Video",
+      "provider": "higgsfield",
+      "type": "video",
+      "endpoint": "bytedance/seedance-2.5/reference-to-video",
+      "kind": "generation",
+      "concurrencyClass": "video",
+      "capabilities": ["reference_to_video", "reference_images", "audio_generation"],
+      "status": "active",
+      "limits": {
+        "resolutions": ["480p", "720p", "1080p"],
+        "aspectRatios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+        "maxReferenceImages": 30
+      },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "prompt": { "type": "string", "minLength": 1 },
+          "duration": { "type": "integer", "default": 5, "maximum": 30, "minimum": 4 },
+          "audio_urls": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "image_urls": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "minItems": 1,
+            "maxItems": 30
+          },
+          "resolution": { "enum": ["480p", "720p", "1080p"], "type": "string", "default": "720p" },
+          "video_urls": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "aspect_ratio": {
+            "enum": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+            "type": "string",
+            "default": "16:9"
+          },
+          "bitrate_mode": { "enum": ["standard", "high"], "type": "string", "default": "high" },
+          "generate_audio": { "type": "boolean", "default": true }
+        },
+        "if": { "required": ["image_urls"] },
+        "else": { "if": { "required": ["video_urls"] }, "else": { "required": ["audio_urls"] } }
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/seedance-2-5/reference-to-video.md",
+        "asOf": "2026-10-02"
+      }
+    },
+    {
+      "id": "soul-id",
+      "name": "Soul ID Character Reference",
+      "provider": "higgsfield",
+      "type": "image",
+      "endpoint": "v1/custom-references",
+      "kind": "custom_reference",
+      "concurrencyClass": "other",
+      "capabilities": ["custom_reference_training"],
+      "status": "active",
+      "limits": {
+        "maxReferenceImages": 100
+      },
+      "inputSchema": {
+        "$defs": {
+          "ImageUrlInputImageSchema": {
+            "properties": {
+              "type": { "const": "image_url", "title": "Type", "type": "string" },
+              "image_url": {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "title": "Image Url",
+                "type": "string"
+              }
+            },
+            "required": ["type", "image_url"],
+            "title": "ImageUrlInputImageSchema",
+            "type": "object"
+          },
+          "SoulModelVersion": { "enum": ["v1", "v2", "cinema"], "title": "SoulModelVersion", "type": "string" }
+        },
+        "properties": {
+          "name": { "maxLength": 100, "title": "Name", "type": "string" },
+          "model_version": { "$ref": "#/$defs/SoulModelVersion", "default": "v1" },
+          "input_images": {
+            "items": { "$ref": "#/$defs/ImageUrlInputImageSchema" },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Input Images",
+            "type": "array"
+          }
+        },
+        "required": ["name", "input_images"],
+        "title": "CreateCustomReferenceSchema",
+        "type": "object"
+      },
+      "source": {
+        "url": "https://docs.higgsfield.ai/docs/models/soul-id/create-character.md",
+        "asOf": "2026-10-02"
+      }
+    }
+  ],
+  "defaultsByModelId": {
+    "xai/grok-imagine-image-2.0": { "quality": "medium", "resolution": "1k", "aspect_ratio": "auto" },
+    "alibaba/qwen-image-3/edit": {
+      "resolution": "1k",
+      "aspect_ratio": "1:1",
+      "prompt_extend": true,
+      "enable_thinking": true,
+      "prompt_extend_mode": "direct"
+    },
+    "kling-video/v2.5-turbo/pro/text-to-video": { "duration": 5, "cfg_scale": 0.5, "negative_prompt": "" },
+    "kling-video/v2.5-turbo/pro/image-to-video": { "duration": 5, "cfg_scale": 0.5, "negative_prompt": "" },
+    "bytedance/seedance-2.5/image-to-video": {
+      "duration": 5,
+      "resolution": "720p",
+      "bitrate_mode": "high",
+      "generate_audio": true
+    },
+    "bytedance/seedance-2.5/reference-to-video": {
+      "duration": 5,
+      "resolution": "720p",
+      "aspect_ratio": "16:9",
+      "bitrate_mode": "high",
+      "generate_audio": true
+    },
+    "soul-id": { "model_version": "v1" }
+  },
+  "unavailable": [
+    {
+      "id": "higgsfield-ai/soul/standard",
+      "reason": "Listed in the API reference index and as a documented consumer of custom_reference_id, but the parameter schema was not captured in the verification reference; excluded rather than guessed.",
+      "source": { "url": "https://docs.higgsfield.ai/docs/api-reference/overview.md", "asOf": "2026-10-02" }
+    },
+    {
+      "id": "higgsfield-ai/soul/v2/standard",
+      "reason": "Listed in the API reference index and as a documented consumer of custom_reference_id, but the parameter schema was not captured in the verification reference; excluded rather than guessed.",
+      "source": { "url": "https://docs.higgsfield.ai/docs/api-reference/overview.md", "asOf": "2026-10-02" }
+    },
+    {
+      "id": "alibaba/qwen-image-3/text-to-image",
+      "reason": "Named as a sibling of alibaba/qwen-image-3/edit; no parameter schema was captured in the verification reference.",
+      "source": { "url": "https://docs.higgsfield.ai/docs/models/qwen-image-3/edit.md", "asOf": "2026-10-02" }
+    },
+    {
+      "id": "kling-video/v2.5-turbo/standard/image-to-video",
+      "reason": "Present in the supplementary openapi.json, which is explicitly not the authoritative model catalog and carries no model page in the verification reference.",
+      "source": { "url": "https://docs.higgsfield.ai/docs/openapi.json", "asOf": "2026-10-02" }
+    },
+    {
+      "id": "minimax/hailuo-2.3/standard/image-to-video",
+      "reason": "Present in the supplementary openapi.json only; no authoritative model page schema in the verification reference.",
+      "source": { "url": "https://docs.higgsfield.ai/docs/openapi.json", "asOf": "2026-10-02" }
+    },
+    {
+      "id": "minimax/hailuo-2.3/standard/text-to-video",
+      "reason": "Present in the supplementary openapi.json only; no authoritative model page schema in the verification reference.",
+      "source": { "url": "https://docs.higgsfield.ai/docs/openapi.json", "asOf": "2026-10-02" }
+    }
+  ]
+}

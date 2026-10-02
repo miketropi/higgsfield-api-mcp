@@ -1,0 +1,148 @@
+name: Skills drift
+
+# Watches the pinned Higgsfield skills upstream and reports the pinned commit,
+# the current upstream HEAD and its VERSION. When the upstream moved AND the
+# workflow token may push branches, it regenerates the skills tree, validates it
+# and opens a pull request for review. It never merges anything: the PR is only a
+# proposal, and every publish/merge stays manual.
+
+on:
+  schedule:
+    # Weekly, Monday 06:17 UTC (off the hour to avoid the shared cron spike).
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skills-drift
+  cancel-in-progress: false
+
+env:
+  CI: '1'
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  check-upstream:
+    name: check upstream pin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm skills:check-upstream` prints
+      #   pinned <commit> / upstream <head> (v<version>) -> drifted|in sync
+      # and exits non-zero when the tree drifted. Its status is captured instead
+      # of failing the step, so the report reaches the job summary either way.
+      - name: Check upstream
+        id: drift
+        run: |
+          set -uo pipefail
+          log="${RUNNER_TEMP}/check-upstream.log"
+          set +e
+          pnpm skills:check-upstream 2>&1 | tee "${log}"
+          status="${PIPESTATUS[0]}"
+          set -e
+          line="$(grep -E '^pinned ' "${log}" | tail -n 1 || true)"
+          pinned="$(printf '%s' "$line" | sed -n 's/^pinned \([^ ]*\) \/.*/\1/p')"
+          upstream="$(printf '%s' "$line" | sed -n 's/.*\/ upstream \([^ ]*\) (.*/\1/p')"
+          version="$(printf '%s' "$line" | sed -n 's/.*(v\([^)]*\)).*/\1/p')"
+          if [ -z "$upstream" ]; then
+            echo "skills:check-upstream produced no drift report (exit ${status})" >&2
+            exit "${status}"
+          fi
+          drifted=false
+          if [ "${status}" -ne 0 ]; then drifted=true; fi
+          {
+            echo "### Skills upstream"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| pinned commit | \`${pinned}\` |"
+            echo "| upstream HEAD | \`${upstream}\` |"
+            echo "| upstream VERSION | \`${version}\` |"
+            echo "| drifted | ${drifted} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo "pinned=${pinned}"
+            echo "upstream=${upstream}"
+            echo "version=${version}"
+            echo "drifted=${drifted}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # The default token is read-only for pull requests from forks and for some
+      # repository settings; the PR step is skipped (with a summary note) unless
+      # the token can push.
+      - name: Probe token permissions
+        id: permission
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          can_open=false
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.permissions.push // false')" = "true" ]; then
+            can_open=true
+          else
+            echo "::notice::the workflow token cannot push branches - reporting drift without opening a pull request"
+          fi
+          echo "can_open=${can_open}" >> "${GITHUB_OUTPUT}"
+
+      - name: Regenerate and validate the skills tree
+        if: steps.drift.outputs.drifted == 'true' && steps.permission.outputs.can_open == 'true'
+        run: |
+          set -euo pipefail
+          pnpm --filter higgsfield-mcp run build
+          node apps/server/dist/cli.js skills sync --upstream "${{ steps.drift.outputs.upstream }}"
+          node apps/server/dist/cli.js skills validate
+
+      # Opens the compatibility pull request; there is deliberately no auto-merge,
+      # no label-triggered automation and no direct push to the default branch.
+      - name: Open compatibility pull request
+        if: steps.drift.outputs.drifted == 'true' && steps.permission.outputs.can_open == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ github.token }}
+          branch: chore/skills-upstream-${{ steps.drift.outputs.upstream }}
+          base: ${{ github.event.repository.default_branch }}
+          delete-branch: true
+          title: 'chore(skills): follow upstream v${{ steps.drift.outputs.version }} (${{ steps.drift.outputs.upstream }})'
+          commit-message: |
+            chore(skills): regenerate the skills tree for upstream ${{ steps.drift.outputs.upstream }}
+
+            pinned ${{ steps.drift.outputs.pinned }} -> upstream ${{ steps.drift.outputs.upstream }} (v${{ steps.drift.outputs.version }})
+          body: |
+            Automated compatibility proposal produced by the scheduled skills-drift workflow.
+
+            | field | value |
+            | --- | --- |
+            | previously pinned commit | `${{ steps.drift.outputs.pinned }}` |
+            | upstream HEAD | `${{ steps.drift.outputs.upstream }}` |
+            | upstream VERSION | `${{ steps.drift.outputs.version }}` |
+
+            The tree was regenerated with `node apps/server/dist/cli.js skills sync --upstream ${{ steps.drift.outputs.upstream }}`
+            and passed `node apps/server/dist/cli.js skills validate`.
+
+            Review before merging: this pull request is never merged automatically, and no release
+            artifact is produced from it.
+          labels: |
+            skills
+            upstream

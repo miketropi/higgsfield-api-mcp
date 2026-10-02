@@ -1,0 +1,455 @@
+{
+  "adapterVersion": "0.1.0",
+  "upstreamCommit": "f83af0bc1d937c8119099a11f8ebbf5e6fb99819",
+  "documents": [
+    {
+      "skill": "higgsfield-generate",
+      "source": "SKILL.md",
+      "output": "higgsfield-generate/SKILL.md",
+      "frontmatter": true,
+      "rules": [
+        {
+          "id": "description-availability",
+          "kind": "replace-text",
+          "from": "  URL\", or \"analyze video virality\". Supports generic generation,\n  workflows, Marketing Studio, and Virality Predictor.",
+          "expected": 1,
+          "to": "  URL\". Supports generic generation through the MCP gateway\n  (image, image edit, text-to-video, image-to-video, reference-to-video).\n  Marketing Studio, Virality Predictor, 3D and audio workflows are\n  unavailable through the gateway."
+        },
+        {
+          "id": "argument-hint",
+          "kind": "replace-text",
+          "from": "argument-hint: \"[prompt-or-analysis-request] [--model <name>] [--image|--video <path-or-id>]\"",
+          "expected": 1,
+          "to": "argument-hint: \"[prompt] [model id] [reference media]\""
+        },
+        {
+          "id": "intro",
+          "kind": "replace-text",
+          "from": "Submit jobs to any Higgsfield model. Wraps the `higgsfield` CLI. Covers generic image/video/3D/audio generation, Marketing Studio (branded ads, avatars, products, hooks, settings), and, secondarily, Virality Predictor video scoring.",
+          "expected": 1,
+          "fragment": "generate/intro.md"
+        },
+        {
+          "id": "bootstrap",
+          "kind": "replace-section",
+          "anchor": "## Step 0 — Bootstrap",
+          "fragment": "generate/bootstrap.md",
+          "expected": 1
+        },
+        {
+          "id": "ux-rules",
+          "kind": "replace-section",
+          "anchor": "## UX Rules",
+          "fragment": "generate/ux-rules.md",
+          "expected": 1
+        },
+        {
+          "id": "discovery-guardrail",
+          "kind": "replace-section",
+          "anchor": "## Discovery guardrail",
+          "fragment": "generate/discovery-guardrail.md",
+          "expected": 1
+        },
+        {
+          "id": "workflow-catalog-note",
+          "kind": "insert-after",
+          "anchor": "## Workflow — generic generation",
+          "fragment": "generate/workflow-note.md",
+          "expected": 1
+        },
+        {
+          "id": "workflow-pick-model",
+          "kind": "replace-text",
+          "from": "   For the actual `--model` ID to pass to `higgsfield generate create`, run `higgsfield model list --json | jq` to map display names to IDs. See `references/model-catalog.md` for the full table.",
+          "expected": 1,
+          "to": "   The catalog is the source of truth for ids and capabilities: `higgsfield.models.list` reports every\n   reachable model, and `higgsfield.models.get` returns its schema, limits and defaults. Check the gateway\n   mapping table at the top of `references/model-catalog.md` before you name a model."
+        },
+        {
+          "id": "workflow-media",
+          "kind": "replace-text",
+          "from": "2. **Pass media inputs straight to flags.** Media flags accept a local file path **or** a UUID. CLI auto-uploads paths and auto-detects job vs upload for UUIDs. No need to pre-upload. Each model declares accepted media roles or `*_references` params — see `references/media-inputs.md`.",
+          "expected": 1,
+          "to": "2. **Pass media as MCP references.** A reference is `{ \"type\": \"asset\", \"asset_id\": \"…\" }`, a public\n   `{ \"type\": \"url\", \"url\": \"…\" }`, or (stdio transport only) `{ \"type\": \"file\", \"path\": \"…\" }`.\n   Upload user media with `higgsfield.media.upload` first and chain what comes back by `asset_id` — see\n   `references/media-inputs.md`."
+        },
+        {
+          "id": "workflow-validate",
+          "kind": "replace-text",
+          "from": "3. **Validate quickly.** If unsure of params, run `higgsfield model get <jst> --json` once and pass only what's needed. Validate the preferred model before falling back to an older one. Use schema defaults otherwise. The server returns `adjustments` for non-fatal coercions (e.g. `aspect_ratio=99:99` → closest match) and a structured error for invalid declared-param values.",
+          "expected": 1,
+          "to": "3. **Validate quickly.** Read `higgsfield.models.get` once for the endpoint and send only the fields it declares:\n   the gateway rejects unknown fields instead of ignoring them, and rejects a value outside a declared enum\n   instead of clamping it."
+        },
+        {
+          "id": "workflow-submit",
+          "kind": "replace-text",
+          "from": "4. **Submit and wait in one shot.** `higgsfield generate create <jst> [--prompt \"...\"] [media flags] [param flags] --wait`. Blocks until terminal status and prints the result on stdout. Tunables: `--wait-timeout 20m` (default 10m), `--wait-interval 5s` (default 3s). Virality Predictor does not need a prompt; pass `--video`.",
+          "expected": 1,
+          "to": "4. **Submit, then poll within the bounded wait.** Submit with `wait: true` for work that finishes in seconds, or\n   submit and poll `higgsfield.jobs.wait`: the gateway clamps `timeout_ms` to\n   `higgsfield.capabilities.limits.max_wait_ms` (25 s shipped, 20 s default), so a larger value buys nothing and\n   `timeout_ms: 0` returns the current state instead of waiting. A returned still-running job is normal — poll\n   again with `higgsfield.jobs.get` rather than resubmitting."
+        },
+        {
+          "id": "workflow-deliver",
+          "kind": "replace-text",
+          "from": "5. **Deliver.** For generated media and 3D assets, send the primary result URL plus a one-line summary (model, duration if video; GLB/asset URL for 3D). For Virality Predictor, deliver the scores, business interpretation, and the Open report link. Do not surface Virality Predictor `.glb`, `.bin`, or region-table internals in normal chat output.",
+          "expected": 1,
+          "to": "5. **Deliver.** Send the primary result URL plus a one-line summary (the model that ran, duration for video).\n   A request that routes to an unavailable workflow stops earlier: say the workflow is unavailable instead of\n   delivering a stand-in for it."
+        },
+        {
+          "id": "workflow-retrospect",
+          "kind": "replace-text",
+          "from": "To inspect or rerun later, `higgsfield generate list --json` and `higgsfield generate get <id> --json` work for retrospection. `higgsfield generate wait <id>` is still available if you ever need to rejoin a job started without `--wait`.",
+          "expected": 1,
+          "to": "To inspect earlier work, `higgsfield.jobs.list` (cursor-paged when the gateway returns `next_cursor`) and\n`higgsfield.jobs.get` read past jobs, and `higgsfield.jobs.cancel` stops one that is still running."
+        },
+        {
+          "id": "workflow-jobs",
+          "kind": "replace-text",
+          "from": "For workflow jobs, use `higgsfield generate workflow <workflow_name> ... --wait`. Cost syntax is `higgsfield generate cost workflow <workflow_name> ...`. See `references/workflows.md`.",
+          "expected": 1,
+          "to": "Workflow jobs are not available through the gateway: there is no workflow tool and no catalog endpoint for them.\nSay so rather than approximating one."
+        },
+        {
+          "id": "workflow-source-video",
+          "kind": "replace-text",
+          "from": "   - Edit existing video from sketch/timestamp, or reframe to another aspect ratio → workflow (`draw_to_video` or `reframe`), not a model. See `references/workflows.md`.",
+          "expected": 1,
+          "to": "   - Edit an existing video from a sketch or timestamp, or reframe it to another aspect ratio → a workflow job\n     (`draw_to_video` or `reframe`), which the gateway does not expose. Say the workflow is unavailable rather than\n     substituting a model for it."
+        },
+        {
+          "id": "media-flags",
+          "kind": "replace-section",
+          "anchor": "## Media flags",
+          "fragment": "generate/media-inputs.md",
+          "expected": 1
+        },
+        {
+          "id": "common-params",
+          "kind": "replace-section",
+          "anchor": "## Common params",
+          "fragment": "generate/common-params.md",
+          "expected": 1
+        },
+        {
+          "id": "marketing-studio",
+          "kind": "replace-section",
+          "anchor": "## Marketing Studio",
+          "fragment": "generate/marketing-studio.md",
+          "expected": 1
+        },
+        {
+          "id": "virality",
+          "kind": "replace-section",
+          "anchor": "## Virality Predictor video scoring",
+          "fragment": "generate/virality.md",
+          "expected": 1
+        },
+        {
+          "id": "errors",
+          "kind": "replace-section",
+          "anchor": "## Errors",
+          "fragment": "generate/errors.md",
+          "expected": 1
+        },
+        {
+          "id": "reference-docs",
+          "kind": "replace-section",
+          "anchor": "## Reference docs",
+          "fragment": "generate/reference-docs.md",
+          "expected": 1
+        }
+      ]
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/model-catalog.md",
+      "output": "higgsfield-generate/references/model-catalog.md",
+      "frontmatter": false,
+      "rules": [
+        {
+          "id": "catalog-banner",
+          "kind": "insert-after",
+          "anchor": "# Model Catalog",
+          "fragment": "generate/model-catalog-banner.md",
+          "expected": 1
+        },
+        {
+          "id": "catalog-intro",
+          "kind": "replace-text",
+          "from": "The full lineup of generation models available through Higgsfield. Each entry has its own sweet spot — pick the one that matches your brief. For the actual `--model` ID to pass to `higgsfield generate create`, run `higgsfield model list --json` and look up by display name.",
+          "expected": 1,
+          "to": "The full lineup of generation models available through Higgsfield. Each entry has its own sweet spot — pick the one that matches your brief. **Read the gateway mapping at the top of this document first**: only the mapped entries are reachable through MCP, and an upstream model that is not mapped is unavailable."
+        },
+        {
+          "id": "catalog-soul-styles",
+          "kind": "replace-text",
+          "from": "Curated styles: `higgsfield preset list soul-v2`, then `--style_id <id>` (not with an image reference).",
+          "expected": 1,
+          "to": "Curated Soul styles are not exposed through an MCP tool, and this model is not in the catalog."
+        },
+        {
+          "id": "catalog-unprofiled",
+          "kind": "replace-text",
+          "from": "check params with `higgsfield model get <id>` first",
+          "expected": 1,
+          "to": "check the model against `higgsfield.models.list` first"
+        },
+        {
+          "id": "catalog-invent",
+          "kind": "replace-text",
+          "from": "- **Don't invent model names.** Run `higgsfield model list` if you're unsure — submitting an unknown model returns `unknown model \"...\"`.",
+          "expected": 1,
+          "to": "- **Don't invent model names.** Read `higgsfield.models.list` if you're unsure — an id the catalog does not declare cannot be submitted."
+        },
+        {
+          "id": "catalog-photoshoot",
+          "kind": "replace-text",
+          "from": "- **Route branded product visuals through `higgsfield-product-photoshoot`** — its prompt enhancer adds 10 mode-specific templates on top of GPT Image 2. Direct GPT Image 2.5 generation here is the right call for everything that isn't a product photoshoot.",
+          "expected": 1,
+          "to": "- **Branded product visuals are unavailable.** The upstream product-photoshoot workflow needs a private backend prompt enhancer and a model that is not in the catalog; say so instead of generating a stand-in and calling it a product shot."
+        },
+        {
+          "id": "catalog-cinema",
+          "kind": "replace-text",
+          "from": "- **Cinema Studio ids** (`cinematic_studio_video_4_0`, `cinematic_studio_3_0`) do not appear in `higgsfield model list`; check them with `higgsfield model get <id>`. Prefer 4.0 when the user asks for Cinema Studio without a version.",
+          "expected": 1,
+          "to": "- **Cinema Studio ids** (`cinematic_studio_video_4_0`, `cinematic_studio_3_0`) are not in the catalog; `higgsfield.models.list` will not report them and they cannot be submitted."
+        },
+        {
+          "id": "catalog-named-model",
+          "kind": "replace-text",
+          "from": "- **When the user names a specific model, use it.** The auto-picks cover the common intents — the rest of the catalog exists for users who know what they want.",
+          "expected": 1,
+          "to": "- **When the user names a model that is not in the catalog, say so.** Offer the mapped catalog entry for that intent and name the substitution."
+        },
+        {
+          "id": "catalog-roles",
+          "kind": "replace-text",
+          "from": "Each model accepts a fixed set of media roles or `*_references` params. When unsure, run `higgsfield model get <model>` and inspect the schema.",
+          "expected": 1,
+          "to": "Each endpoint declares a fixed set of media fields. When unsure, read `higgsfield.models.get` and inspect the schema."
+        },
+        {
+          "id": "catalog-clamp",
+          "kind": "replace-text",
+          "from": "These are model-specific. The CLI clamps unsupported values to the nearest allowed one (with a `Note: adjustments applied` warning) when the model declares a closed set. When in doubt:",
+          "expected": 1,
+          "to": "These are model-specific. The gateway rejects a value outside a declared closed set instead of clamping it. When in doubt:"
+        },
+        {
+          "id": "catalog-get-block",
+          "kind": "replace-text",
+          "from": "```bash\nhiggsfield model get <model>\n```",
+          "expected": 1,
+          "to": "```json\n{ \"tool\": \"higgsfield.models.get\", \"arguments\": { \"model\": \"<model>\" } }\n```"
+        }
+      ]
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/media-inputs.md",
+      "output": "higgsfield-generate/references/media-inputs.md",
+      "frontmatter": false,
+      "rules": [
+        {
+          "id": "media-inputs-body",
+          "kind": "replace-section",
+          "anchor": "# Media Inputs",
+          "fragment": "generate/references-media-inputs.md",
+          "expected": 1
+        }
+      ]
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/prompt-engineering.md",
+      "output": "higgsfield-generate/references/prompt-engineering.md",
+      "frontmatter": false,
+      "rules": [
+        {
+          "id": "pe-image-size",
+          "kind": "replace-text",
+          "from": "When passing `--image`, the prompt should describe what changes, not redescribe the input.",
+          "expected": 1,
+          "to": "When a reference image is attached (`reference_images`), the prompt should describe what changes, not redescribe the input."
+        },
+        {
+          "id": "pe-start-image",
+          "kind": "replace-text",
+          "from": "`--start-image` anchors the first frame. Prompt describes motion.",
+          "expected": 1,
+          "to": "`start_image` anchors the first frame. Prompt describes motion."
+        },
+        {
+          "id": "pe-ratio",
+          "kind": "replace-text",
+          "from": "- `4:3`, `3:4`, `21:9` — model-dependent, check `higgsfield model get <jst>`",
+          "expected": 1,
+          "to": "- `4:3`, `3:4`, `21:9` — model-dependent, check `higgsfield.models.get`"
+        }
+      ]
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/troubleshooting.md",
+      "output": "higgsfield-generate/references/troubleshooting.md",
+      "frontmatter": false,
+      "rules": [
+        {
+          "id": "troubleshooting-body",
+          "kind": "replace-section",
+          "anchor": "# Troubleshooting",
+          "fragment": "generate/references-troubleshooting.md",
+          "expected": 1
+        }
+      ]
+    },
+    {
+      "skill": "higgsfield-soul-id",
+      "source": "SKILL.md",
+      "output": "higgsfield-soul-id/SKILL.md",
+      "frontmatter": true,
+      "rules": [
+        {
+          "id": "description-chain",
+          "kind": "replace-text",
+          "from": "  Chain: train Soul (one-time, returns reference_id) → use in\n  higgsfield-generate via `--soul-id <id>` with models like\n  `text2image_soul_v2` or `soul_cinematic`.\n  NOT for: one-shot face swaps (use higgsfield-generate with --image),\n  named-character / non-photo avatars (use higgsfield-generate with prompt).",
+          "expected": 1,
+          "to": "  Chain: train Soul (one-time, returns reference_id). Using that\n  identity for generation is not available through the MCP gateway.\n  NOT for: one-shot face swaps (use higgsfield-generate with reference\n  images), named-character / non-photo avatars (use higgsfield-generate\n  with prompt)."
+        },
+        {
+          "id": "intro",
+          "kind": "replace-text",
+          "from": "Train a face-faithful identity model. Reusable across all Soul-powered generations.",
+          "expected": 1,
+          "fragment": "soul/intro.md"
+        },
+        {
+          "id": "bootstrap",
+          "kind": "replace-section",
+          "anchor": "## Step 0 — Bootstrap",
+          "fragment": "soul/bootstrap.md",
+          "expected": 1
+        },
+        {
+          "id": "ux-rules",
+          "kind": "replace-section",
+          "anchor": "## UX Rules",
+          "fragment": "soul/ux-rules.md",
+          "expected": 1
+        },
+        {
+          "id": "workflow",
+          "kind": "replace-section",
+          "anchor": "## Workflow",
+          "fragment": "soul/workflow.md",
+          "expected": 1
+        },
+        {
+          "id": "use-the-soul",
+          "kind": "replace-section",
+          "anchor": "## Use the Soul",
+          "fragment": "soul/use-the-soul.md",
+          "expected": 1
+        },
+        {
+          "id": "listing",
+          "kind": "replace-section",
+          "anchor": "## Listing existing Souls",
+          "fragment": "soul/listing.md",
+          "expected": 1
+        },
+        {
+          "id": "errors",
+          "kind": "replace-section",
+          "anchor": "## Errors",
+          "fragment": "soul/errors.md",
+          "expected": 1
+        }
+      ]
+    },
+    {
+      "skill": "higgsfield-soul-id",
+      "source": "references/troubleshooting.md",
+      "output": "higgsfield-soul-id/references/troubleshooting.md",
+      "frontmatter": false,
+      "rules": [
+        {
+          "id": "soul-troubleshooting-body",
+          "kind": "replace-section",
+          "anchor": "# Soul Troubleshooting",
+          "fragment": "soul/references-troubleshooting.md",
+          "expected": 1
+        }
+      ]
+    }
+  ],
+  "copy": [
+    {
+      "skill": "higgsfield-soul-id",
+      "source": "references/photo-guide.md",
+      "output": "higgsfield-soul-id/references/photo-guide.md"
+    }
+  ],
+  "skip": [
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/workflows.md",
+      "reason": "Documents workflow jobs (draw_to_video, reframe) for which the gateway has no tool or endpoint."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-modes.md",
+      "reason": "Marketing Studio is unavailable: no catalog endpoint, and its setup libraries are server-side."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-avatars.md",
+      "reason": "Marketing Studio avatars are server-side state with no MCP tool."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-products.md",
+      "reason": "Marketing Studio product entities are server-side state with no MCP tool."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-setup-items.md",
+      "reason": "Marketing Studio hooks/settings are server-side state with no MCP tool."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-ad-references.md",
+      "reason": "Marketing Studio ad references are server-side state with no MCP tool."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-brand-kits.md",
+      "reason": "Marketing Studio brand kits are server-side state with no MCP tool."
+    },
+    {
+      "skill": "higgsfield-generate",
+      "source": "references/marketing-dtc-ads.md",
+      "reason": "Marketing Studio ad formats and the DTC ads engine are server-side and unavailable."
+    }
+  ],
+  "forbidden": [
+    {
+      "pattern": "\\bhiggsfield\\s+(?:generate|model|soul-id|upload|preset|workflow|marketing-studio|product-photoshoot|marketplace-cards|website|voices|account|auth|game|explainer|cost)\\b",
+      "reason": "Higgsfield CLI invocation"
+    },
+    {
+      "pattern": "install\\.sh",
+      "reason": "CLI installer reference"
+    },
+    {
+      "pattern": "curl[^\\n]*\\|\\s*(?:sh|bash)",
+      "reason": "network bootstrap pipe"
+    },
+    {
+      "pattern": "\\bnpm\\s+install\\b",
+      "reason": "npm install step"
+    },
+    {
+      "pattern": "\\bpip\\s+install\\b",
+      "reason": "pip install step"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+# Build-context hygiene for the gateway image.
+#
+# Everything here is either reconstructible (`dist/`, `node_modules/`) or is not
+# an input to `pnpm install --frozen-lockfile` + `pnpm -r run build`. Excluding
+# them keeps the context small and guarantees no local/untracked artifact can
+# leak into an image layer.
+#
+# Credentials are never part of the context: `.env` and every `.env.*` variant
+# are excluded, including this repository's `.env.example`.
+
+.git
+.github
+.gitignore
+.gitattributes
+
+# Dependency and build output
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+.pnpm-store
+pnpm-debug.log*
+
+# Local overrides and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Test, tooling and documentation trees (not build inputs for the image).
+#
+# Markdown is NOT excluded globally: the generated skills tree is markdown
+# (`skills/**/SKILL.md`, `skills/**/references/*.md`) and is copied into the
+# image, so only the top-level documents are excluded.
+coverage
+artifacts
+tmp
+tests
+scripts
+docs
+/SPEC.md
+/README.md
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+*.log
