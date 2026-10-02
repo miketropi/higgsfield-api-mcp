@@ -62,9 +62,10 @@ jobs:
           status="${PIPESTATUS[0]}"
           set -e
           if [ "${status}" -ne 0 ]; then
-            # Mirror the tail of the output into the check-run annotations, which is
-            # the view a reader sees without fetching logs.
-            tail -c 3500 "${RUNNER_TEMP}/unit.log" | sed 's/^/::error::/'
+            # Mirror the failure detail into the check-run annotations, which is the view
+            # a reader sees without fetching logs.
+            { awk '/Failed Tests/{p=1} p' "${RUNNER_TEMP}/unit.log" || true; tail -c 1500 "${RUNNER_TEMP}/unit.log"; } \
+              | head -c 6000 | sed 's/^/::error::/'
             exit "${status}"
           fi
 
@@ -75,7 +76,8 @@ jobs:
           status="${PIPESTATUS[0]}"
           set -e
           if [ "${status}" -ne 0 ]; then
-            tail -c 3500 "${RUNNER_TEMP}/contract.log" | sed 's/^/::error::/'
+            { awk '/Failed Tests/{p=1} p' "${RUNNER_TEMP}/contract.log" || true; tail -c 1500 "${RUNNER_TEMP}/contract.log"; } \
+              | head -c 6000 | sed 's/^/::error::/'
             exit "${status}"
           fi
 
